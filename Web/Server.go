@@ -91,7 +91,7 @@ func (s *Server) StartWebServer(port string) {
 
 	r := gin.Default()
 	authorized := r.Group("/", gin.BasicAuth(gin.Accounts{
-		"admin": "ss0t@m4x",
+		"admin": "passwd",
 	}))
 
 	r.Use(cors.New(cors.Config{
