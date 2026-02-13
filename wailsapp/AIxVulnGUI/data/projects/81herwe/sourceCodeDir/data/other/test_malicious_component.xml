@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<channel>
-  <item>
-    <title>Malicious Component</title>
-    <slug>malicious</slug>
-    <value>&lt;?php system("echo RCE_VULNERABILITY_DEMONSTRATED > /tmp/rce_marker.txt"); ?&gt;</value>
-    <disabled>false</disabled>
-  </item>
-</channel>

