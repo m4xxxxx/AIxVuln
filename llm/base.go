@@ -25,6 +25,7 @@ type Memory interface {
 	PopPendingUserMessages() []Message
 	LockForLLM()
 	UnlockForLLM()
+	GetMaxHistory() int
 	CompressIfNeeded(cli Client, model string) error
 	// ResetMemoryWithSummary compresses all existing memory into a single
 	// summary message via LLM, clears the memory, and injects the summary

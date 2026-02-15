@@ -208,7 +208,7 @@ func (c *ReportCommonAgent) executeTask(ctx context.Context, assignment TaskAssi
 		}
 		c.memory.LockForLLM()
 		debugLastMessages(c.profile.PersonaName, msgList)
-		assistantMessage, toolMessage, err := c.client.ToolCallRequest(ctx, llm.GetResponsesClient("report", "main_setting"), msgList, model, c.Name(), c.task.GetProjectName())
+		assistantMessage, toolMessage, err := c.client.ToolCallRequestWithLabel(ctx, llm.GetResponsesClient("report", "main_setting"), msgList, model, c.Name(), c.profile.PersonaName, c.task.GetProjectName())
 		if err != nil {
 			c.memory.UnlockForLLM()
 			return &StartResp{Err: err}

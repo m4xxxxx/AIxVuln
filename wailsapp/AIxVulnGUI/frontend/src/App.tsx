@@ -34,7 +34,6 @@ function App() {
     const [loginLoading, setLoginLoading] = useState<boolean>(false);
     const [projects, setProjects] = useState<string[]>([]);
     const [events, setEvents] = useState<any[]>([]);
-    const [brainFeed, setBrainFeed] = useState<any[]>([]);
     const [agentRuns, setAgentRuns] = useState<any[]>([]);
     const [digitalHumanRoster, setDigitalHumanRoster] = useState<Record<string, any[]>>({});
     const [exploitIdeas, setExploitIdeas] = useState<any[]>([]);
@@ -49,7 +48,7 @@ function App() {
     const [detailProject, setDetailProject] = useState<string>('');
     const [detailOpen, setDetailOpen] = useState<boolean>(false);
     const [detailTitle, setDetailTitle] = useState<string>('');
-    const [detailKind, setDetailKind] = useState<'agent' | 'agentFeed' | 'exploitIdea' | 'exploitChain' | 'container' | 'report' | 'json' | 'digitalHumanProfile'>('json');
+    const [detailKind, setDetailKind] = useState<'agent' | 'exploitIdea' | 'exploitChain' | 'container' | 'report' | 'json' | 'digitalHumanProfile'>('json');
     const [detailObj, setDetailObj] = useState<any>(null);
     const [projectName, setProjectName] = useState<string>('');
     const [taskContent, setTaskContent] = useState<string>('尽可能的挖掘项目中的漏洞，侧重挖掘未授权情况下能完成的高危攻击链');
@@ -66,7 +65,9 @@ function App() {
     const [chatFullscreen, setChatFullscreen] = useState<boolean>(false);
     const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err' } | null>(null);
     const [btnLoading, setBtnLoading] = useState<Record<string, boolean>>({});
-    const [tokenUsage, setTokenUsage] = useState<{ prompt_tokens: number; completion_tokens: number; total_tokens: number }>({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
+    const [tokenUsage, setTokenUsage] = useState<{ prompt_tokens: number; completion_tokens: number; total_tokens: number; agents?: { label: string; prompt_tokens: number; completion_tokens: number; total_tokens: number }[] }>({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, agents: [] });
+    const [showTokenPanel, setShowTokenPanel] = useState<boolean>(false);
+    const [contextBreakdown, setContextBreakdown] = useState<{ sections: { name: string; tokens: number }[]; total: number; max_context: number }>({ sections: [], total: 0, max_context: 0 });
     const [configData, setConfigData] = useState<Record<string, Record<string, string>>>({});
     const [configDraft, setConfigDraft] = useState<Record<string, Record<string, string>>>({});
     const [configLoading, setConfigLoading] = useState<boolean>(false);
@@ -177,7 +178,6 @@ function App() {
         setProjectStatus('');
         setProjectIsRunning(false);
         setBrainFinished(false);
-        setBrainFeed([]);
         setEvents([]);
     }
 
@@ -410,18 +410,6 @@ function App() {
 
         const js = (await resp.json()) as ApiResp<T>;
         return getRespData(js);
-    }
-
-    async function openAgentProcess(agentID: string) {
-        if (!detailProject || !authHeader) return;
-        try {
-            const name = encodeURIComponent(detailProject);
-            const aid = encodeURIComponent(agentID);
-            const feed = (await apiGet<any[]>(`/projects/${name}/agents/${aid}/feed?count=200`)) || [];
-            openDetail('agentFeed', `执行过程`, { agentID, feed });
-        } catch (e: any) {
-            openDetail('json', '执行过程加载失败', { error: String(e?.message ?? e ?? 'error') });
-        }
     }
 
     async function refreshProjects() {
@@ -675,7 +663,7 @@ function App() {
         }
     }
 
-    function openDetail(kind: 'agent' | 'agentFeed' | 'exploitIdea' | 'exploitChain' | 'container' | 'report' | 'json' | 'digitalHumanProfile', title: string, obj: any) {
+    function openDetail(kind: 'agent' | 'exploitIdea' | 'exploitChain' | 'container' | 'report' | 'json' | 'digitalHumanProfile', title: string, obj: any) {
         setDetailTitle(title);
         setDetailKind(kind);
         setDetailObj(obj);
@@ -710,9 +698,6 @@ function App() {
         const chains = proj?.exploitChains;
         if (Array.isArray(chains)) setExploitChains(chains);
 
-        const bf = proj?.brainFeed;
-        if (Array.isArray(bf)) setBrainFeed(bf.slice().reverse());
-
         const cs = proj?.containers;
         if (Array.isArray(cs)) setContainers(cs);
 
@@ -734,6 +719,19 @@ function App() {
                     prompt_tokens: Number(tu?.prompt_tokens ?? 0),
                     completion_tokens: Number(tu?.completion_tokens ?? 0),
                     total_tokens: Number(tu?.total_tokens ?? 0),
+                    agents: Array.isArray(tu?.agents) ? tu.agents : [],
+                });
+            }
+        } catch { /* ignore */ }
+
+        // Load context breakdown.
+        try {
+            const cb = await apiGet<any>(`/projects/${name}/context_breakdown`);
+            if (cb && typeof cb === 'object') {
+                setContextBreakdown({
+                    sections: Array.isArray(cb?.sections) ? cb.sections : [],
+                    total: Number(cb?.total ?? 0),
+                    max_context: Number(cb?.max_context ?? 0),
                 });
             }
         } catch { /* ignore */ }
@@ -872,123 +870,6 @@ function App() {
                     <div className="rounded-lg border border-border bg-background/20 p-3">
                         <div className="prose prose-invert max-w-none text-sm">
                             <ReactMarkdown>{content}</ReactMarkdown>
-                        </div>
-                    </div>
-                </div>
-            );
-        }
-
-        if (kind === 'agentFeed') {
-            const feed = Array.isArray(obj?.feed) ? obj.feed : Array.isArray(obj) ? obj : [];
-            const agentID = String(obj?.agentID ?? '');
-            return (
-                <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                        <div className="text-xs text-muted-foreground">执行记录</div>
-                        <Badge variant="secondary">{feed.length}</Badge>
-                    </div>
-                    <div className="h-[520px] rounded-lg border border-border bg-background/20" style={{ overflow: 'auto' }}>
-                        <div className="p-2 space-y-2" style={{ minWidth: 0 }}>
-                            {feed.map((e: any, idx: number) => {
-                                const k = String(e?.kind ?? '-');
-                                const data = e?.data;
-                                if (k === 'AgentMessage') {
-                                    const content = data?.content ?? data?.Content;
-                                    const role = data?.role ?? data?.Role;
-                                    const ts = data?.ts ?? e?.ts;
-                                    const maxPreview = 240;
-                                    return (
-                                        <details key={idx} className="rounded-lg border border-border bg-background/10 px-3 py-2 hover:bg-muted/30">
-                                            <summary className="cursor-pointer list-none">
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <div className="font-semibold text-sm">思考</div>
-                                                    <div className="flex items-center gap-2">
-                                                        {ts ? <Badge variant="secondary" className="border border-border bg-transparent">{String(ts)}</Badge> : null}
-                                                        <Badge variant="secondary">{String(role ?? '-')}</Badge>
-                                                        <button className="text-xs text-muted-foreground hover:text-foreground" onClick={(ev) => {
-                                                            ev.preventDefault();
-                                                            openDetail('json', 'AgentMessage', e);
-                                                        }}>详情</button>
-                                                    </div>
-                                                </div>
-                                                {isTruncated(content ?? '', maxPreview) ? (
-                                                    <div className="mt-2 text-xs text-muted-foreground" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
-                                                        {shortText(content ?? '', maxPreview)}
-                                                    </div>
-                                                ) : null}
-                                            </summary>
-                                            <div className="mt-2 prose prose-invert max-w-none text-sm" style={{ wordBreak: 'break-word' }}>
-                                                <ReactMarkdown>{String(content ?? '')}</ReactMarkdown>
-                                            </div>
-                                        </details>
-                                    );
-                                }
-                                if (k === 'AgentToolCall') {
-                                    const stage = data?.stage;
-                                    const toolName = data?.name;
-                                    const argumentsStr = data?.arguments;
-                                    const result = data?.result;
-                                    const error = data?.error;
-                                    const ts = data?.ts ?? e?.ts;
-                                    const maxPreview = 320;
-                                    return (
-                                        <details key={idx} className="rounded-lg border border-border bg-background/10 px-3 py-2 hover:bg-muted/30">
-                                            <summary className="cursor-pointer list-none">
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <div className="font-semibold text-sm">工具调用</div>
-                                                    <div className="flex items-center gap-2">
-                                                        {ts ? <Badge variant="secondary" className="border border-border bg-transparent">{String(ts)}</Badge> : null}
-                                                        <Badge variant={stage === 'result' ? 'success' : 'warning'}>{String(stage ?? '-')}</Badge>
-                                                        <button className="text-xs text-muted-foreground hover:text-foreground" onClick={(ev) => {
-                                                            ev.preventDefault();
-                                                            openDetail('json', 'AgentToolCall', e);
-                                                        }}>详情</button>
-                                                    </div>
-                                                </div>
-                                                <div className="mt-1 text-xs text-muted-foreground">{String(toolName ?? '-')}</div>
-                                                {argumentsStr ? (
-                                                    <div className="mt-2 text-xs text-muted-foreground" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
-                                                        {shortText(argumentsStr, maxPreview)}
-                                                    </div>
-                                                ) : null}
-                                                {error ? (
-                                                    <div className="mt-2 text-xs text-destructive" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
-                                                        {shortText(error, 240)}
-                                                    </div>
-                                                ) : null}
-                                                {result ? (
-                                                    <div className="mt-2 text-xs text-muted-foreground" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
-                                                        {shortText(result, maxPreview)}
-                                                    </div>
-                                                ) : null}
-                                            </summary>
-                                            {argumentsStr ? (
-                                                <div className="mt-2">
-                                                    <div className="text-xs text-muted-foreground mb-1">arguments</div>
-                                                    <pre className="aix-pre" style={{ maxHeight: 260, overflow: 'auto', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{String(argumentsStr)}</pre>
-                                                </div>
-                                            ) : null}
-                                            {result ? (
-                                                <div className="mt-2">
-                                                    <div className="text-xs text-muted-foreground mb-1">result</div>
-                                                    <pre className="aix-pre" style={{ maxHeight: 260, overflow: 'auto', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{String(result)}</pre>
-                                                </div>
-                                            ) : null}
-                                        </details>
-                                    );
-                                }
-
-                                return (
-                                    <div
-                                        key={idx}
-                                        className="rounded-lg border border-border bg-background/10 px-3 py-2 hover:bg-muted/30 cursor-pointer"
-                                        onClick={() => openDetail('json', 'AgentFeed', e)}
-                                    >
-                                        <div className="text-xs text-muted-foreground">{JSON.stringify(e)}</div>
-                                    </div>
-                                );
-                            })}
-                            {feed.length === 0 ? <div className="text-sm text-muted-foreground p-2">暂无执行过程</div> : null}
                         </div>
                     </div>
                 </div>
@@ -1201,28 +1082,6 @@ function App() {
             try {
                 const msg = JSON.parse(ev.data);
 
-                if (msg?.type === 'BrainMessage' && msg?.data) {
-                    setBrainFeed((prev) => [{ kind: 'BrainMessage', data: msg.data }, ...prev].slice(0, 200));
-                    return;
-                }
-                if (msg?.type === 'BrainToolCall' && msg?.data) {
-                    setBrainFeed((prev) => [{ kind: 'BrainToolCall', data: msg.data }, ...prev].slice(0, 200));
-                    return;
-                }
-
-                if ((msg?.type === 'AgentMessage' || msg?.type === 'AgentToolCall') && msg?.data?.agentID) {
-                    const cur = detailLiveRef.current;
-                    if (cur?.open && cur?.kind === 'agentFeed' && String(cur?.obj?.agentID ?? '') === String(msg.data.agentID)) {
-                        const incoming = { kind: msg.type, data: msg.data };
-                        setDetailObj((prev: any) => {
-                            if (!prev || String(prev?.agentID ?? '') !== String(msg.data.agentID)) return prev;
-                            const nextFeed = Array.isArray(prev.feed) ? [...prev.feed, incoming] : [incoming];
-                            return { ...prev, feed: nextFeed.slice(-200) };
-                        });
-                    }
-                    return;
-                }
-
                 if (msg?.type === 'string' && typeof msg?.data === 'string') {
                     // legacy event stream: no longer displayed
                     return;
@@ -1317,6 +1176,17 @@ function App() {
                         prompt_tokens: Number(d?.prompt_tokens ?? 0),
                         completion_tokens: Number(d?.completion_tokens ?? 0),
                         total_tokens: Number(d?.total_tokens ?? 0),
+                        agents: Array.isArray(d?.agents) ? d.agents : [],
+                    });
+                    return;
+                }
+
+                if (msg?.type === 'BrainContextBreakdown' && msg?.data) {
+                    const d = msg.data as any;
+                    setContextBreakdown({
+                        sections: Array.isArray(d?.sections) ? d.sections : [],
+                        total: Number(d?.total ?? 0),
+                        max_context: Number(d?.max_context ?? 0),
                     });
                     return;
                 }
@@ -1691,12 +1561,15 @@ function App() {
                     {view === 'detail' ? (
                         <>
                             {tokenUsage.total_tokens > 0 && (
-                                <span
+                                <button
+                                    className="aix-nav-pill"
                                     title={`Prompt: ${formatTokens(tokenUsage.prompt_tokens)} | Completion: ${formatTokens(tokenUsage.completion_tokens)} | Total: ${formatTokens(tokenUsage.total_tokens)}`}
-                                    style={{ fontSize: '0.82rem', opacity: 0.75, marginRight: 8, fontFamily: 'monospace', whiteSpace: 'nowrap' }}
+                                    style={{ fontSize: '0.82rem', fontFamily: 'monospace', whiteSpace: 'nowrap' }}
+                                    onClick={() => setShowTokenPanel(v => !v)}
                                 >
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{width:14,height:14}}><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
                                     Tokens: {formatTokens(tokenUsage.total_tokens)}
-                                </span>
+                                </button>
                             )}
                             <button className="aix-nav-pill aix-nav-pill--accent" onClick={() => {
                                 connectWS(detailProject);
@@ -1749,6 +1622,64 @@ function App() {
                     )}
                 </div>
             </div>
+
+            {showTokenPanel && tokenUsage.total_tokens > 0 && (() => {
+                const agents = tokenUsage.agents ?? [];
+                const maxTotal = Math.max(...agents.map(a => a.total_tokens), 1);
+                const barColors = ['#6366f1','#22d3ee','#f59e0b','#10b981','#f43f5e','#8b5cf6','#ec4899','#14b8a6','#ef4444','#3b82f6'];
+                return (
+                    <div style={{ position:'fixed', inset:0, zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(0,0,0,0.55)', backdropFilter:'blur(4px)' }} onClick={() => setShowTokenPanel(false)}>
+                        <div style={{ background:'#1a1a2e', borderRadius:16, padding:'28px 32px', minWidth:520, maxWidth:'90vw', maxHeight:'85vh', overflow:'auto', boxShadow:'0 8px 32px rgba(0,0,0,0.5)', border:'1px solid rgba(255,255,255,0.08)' }} onClick={e => e.stopPropagation()}>
+                            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+                                <h2 style={{ margin:0, fontSize:'1.15rem', fontWeight:600, color:'#e2e8f0' }}>Token 用量统计</h2>
+                                <button onClick={() => setShowTokenPanel(false)} style={{ background:'none', border:'none', color:'#94a3b8', cursor:'pointer', fontSize:'1.2rem', padding:'4px 8px' }}>&times;</button>
+                            </div>
+                            <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, marginBottom:24 }}>
+                                <div style={{ background:'rgba(99,102,241,0.12)', borderRadius:10, padding:'14px 16px', textAlign:'center' }}>
+                                    <div style={{ fontSize:'0.75rem', color:'#94a3b8', marginBottom:4 }}>Prompt</div>
+                                    <div style={{ fontSize:'1.2rem', fontWeight:700, color:'#818cf8', fontFamily:'monospace' }}>{formatTokens(tokenUsage.prompt_tokens)}</div>
+                                </div>
+                                <div style={{ background:'rgba(34,211,238,0.12)', borderRadius:10, padding:'14px 16px', textAlign:'center' }}>
+                                    <div style={{ fontSize:'0.75rem', color:'#94a3b8', marginBottom:4 }}>Completion</div>
+                                    <div style={{ fontSize:'1.2rem', fontWeight:700, color:'#22d3ee', fontFamily:'monospace' }}>{formatTokens(tokenUsage.completion_tokens)}</div>
+                                </div>
+                                <div style={{ background:'rgba(255,255,255,0.06)', borderRadius:10, padding:'14px 16px', textAlign:'center' }}>
+                                    <div style={{ fontSize:'0.75rem', color:'#94a3b8', marginBottom:4 }}>Total</div>
+                                    <div style={{ fontSize:'1.2rem', fontWeight:700, color:'#e2e8f0', fontFamily:'monospace' }}>{formatTokens(tokenUsage.total_tokens)}</div>
+                                </div>
+                            </div>
+                            {agents.length > 0 && (
+                                <>
+                                    <div style={{ fontSize:'0.85rem', color:'#94a3b8', marginBottom:12, fontWeight:500 }}>各数字人 / 决策大脑用量</div>
+                                    <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                                        {agents.map((a, i) => {
+                                            const pct = Math.max((a.total_tokens / maxTotal) * 100, 2);
+                                            const promptPct = a.total_tokens > 0 ? (a.prompt_tokens / a.total_tokens) * 100 : 50;
+                                            const color = barColors[i % barColors.length];
+                                            return (
+                                                <div key={a.label} style={{ display:'flex', alignItems:'center', gap:12 }}>
+                                                    <div style={{ width:80, fontSize:'0.8rem', color:'#cbd5e1', textAlign:'right', flexShrink:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={a.label}>{a.label}</div>
+                                                    <div style={{ flex:1, position:'relative', height:22, background:'rgba(255,255,255,0.04)', borderRadius:6, overflow:'hidden' }}>
+                                                        <div style={{ position:'absolute', left:0, top:0, height:'100%', width:`${pct}%`, borderRadius:6, display:'flex', overflow:'hidden' }}>
+                                                            <div style={{ width:`${promptPct}%`, height:'100%', background:color, opacity:0.9 }} />
+                                                            <div style={{ flex:1, height:'100%', background:color, opacity:0.5 }} />
+                                                        </div>
+                                                    </div>
+                                                    <div style={{ width:80, fontSize:'0.75rem', color:'#94a3b8', fontFamily:'monospace', textAlign:'right', flexShrink:0 }}>{formatTokens(a.total_tokens)}</div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <div style={{ display:'flex', gap:16, marginTop:14, fontSize:'0.72rem', color:'#64748b', justifyContent:'flex-end' }}>
+                                        <span style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ display:'inline-block', width:10, height:10, borderRadius:2, background:'#6366f1', opacity:0.9 }} /> Prompt</span>
+                                        <span style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ display:'inline-block', width:10, height:10, borderRadius:2, background:'#6366f1', opacity:0.5 }} /> Completion</span>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                );
+            })()}
 
             <div className={view === 'detail' ? 'aix-grid aix-grid--detail' : 'aix-grid'}>
                 {view === 'settings' ? (() => {
@@ -2382,22 +2313,24 @@ function App() {
                                                                 <Badge variant={state === 'busy' ? 'warning' : 'secondary'}>{state === 'busy' ? '忙碌' : '空闲'}</Badge>
                                                             </div>
                                                         </div>
-                                                        {agentId ? (
-                                                            <div className="mt-1 flex items-center justify-end gap-2">
-                                                                    <Button
-                                                                        size="sm"
-                                                                        variant="outline"
-                                                                        onClick={(ev) => {
-                                                                            ev.preventDefault();
-                                                                            ev.stopPropagation();
-                                                                            if (agentId) openAgentProcess(agentId);
-                                                                        }}
-                                                                    >
-                                                                        查看执行过程
-                                                                    </Button>
-                                                                    {runState ? <Badge variant={badgeVariantForRunState(runState)}>{String(runState)}</Badge> : null}
-                                                            </div>
-                                                        ) : null}
+                                                        {(() => {
+                                                            const ctxSize = Number(h?.context_size ?? 0);
+                                                            const maxCtx = Number(h?.max_context ?? 0);
+                                                            if (maxCtx <= 0) return null;
+                                                            const pct = Math.min(100, (ctxSize / maxCtx) * 100);
+                                                            const barColor = pct > 85 ? '#ef4444' : pct > 60 ? '#f59e0b' : '#10b981';
+                                                            return (
+                                                                <div className="mt-1.5 space-y-1">
+                                                                    <div className="flex items-center justify-between gap-2">
+                                                                        {runState ? <Badge variant={badgeVariantForRunState(runState)}>{String(runState)}</Badge> : <span />}
+                                                                        <span className="text-[10px] tabular-nums text-muted-foreground">{ctxSize.toLocaleString()} / {maxCtx.toLocaleString()} tokens</span>
+                                                                    </div>
+                                                                    <div style={{ height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                                                                        <div style={{ height: '100%', borderRadius: 2, width: `${pct}%`, background: barColor, transition: 'width 0.5s ease' }} />
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })()}
                                                         {state === 'idle' && (h?.last_summary || h?.last_task) ? (
                                                             <div className="mt-1 text-xs text-muted-foreground line-clamp-2" style={{ overflowWrap: 'anywhere' }}>上次：{String(h?.last_summary || h?.last_task || '')}</div>
                                                         ) : null}
@@ -2597,86 +2530,97 @@ function App() {
 
                     <div>
                         <div className="flex items-center justify-between">
-                            <div className="text-sm font-semibold">决策大脑</div>
-                            <Badge>{brainFeed.length}</Badge>
+                            <div className="text-sm font-semibold">决策大脑 · 上下文占用</div>
+                            <Badge variant={contextBreakdown.max_context > 0 && contextBreakdown.total > contextBreakdown.max_context * 0.85 ? 'destructive' : 'secondary'}>
+                                {contextBreakdown.total > 0 ? `${contextBreakdown.total.toLocaleString()} / ${contextBreakdown.max_context.toLocaleString()} tokens` : '等待数据'}
+                            </Badge>
                         </div>
-                        <ScrollArea className="mt-2 h-[320px] rounded-lg border border-border bg-background/20">
-                            <div className="p-2 space-y-2">
-                                {brainFeed.slice(0, 140).map((e, idx) => {
-                                    const kind = String(e?.kind ?? '-');
-                                    const data = e?.data;
-                                    if (kind === 'BrainMessage') {
-                                        const content = data?.content ?? data?.Content;
-                                        const role = data?.role ?? data?.Role;
-                                        const ts = data?.ts;
-                                        const maxPreview = 240;
-                                        return (
-                                            <details key={idx} className="rounded-lg border border-border bg-background/10 px-3 py-2 hover:bg-muted/30 overflow-hidden" style={{ wordBreak: 'break-word' }}>
-                                                <summary className="cursor-pointer list-none">
-                                                    <div className="flex items-center justify-between gap-2">
-                                                        <div className="font-semibold text-sm">思考</div>
-                                                        <div className="flex items-center gap-2">
-                                                            {ts ? <Badge variant="secondary" className="border border-border bg-transparent">{String(ts)}</Badge> : null}
-                                                            <Badge variant="secondary">{String(role ?? '-')}</Badge>
-                                                            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={(ev) => {
-                                                                ev.preventDefault();
-                                                                openDetail('json', 'BrainMessage', brainFeed[idx]);
-                                                            }}>详情</button>
-                                                        </div>
-                                                    </div>
-                                                </summary>
-                                                <div className="mt-2 prose prose-invert max-w-none text-sm">
-                                                    <ReactMarkdown>{String(content ?? '')}</ReactMarkdown>
-                                                </div>
-                                            </details>
-                                        );
-                                    }
-                                    if (kind === 'BrainToolCall') {
-                                        const stage = data?.stage;
-                                        const name = data?.name;
-                                        const args = data?.arguments;
-                                        const result = data?.result;
-                                        const err = data?.error;
-                                        const ts = data?.ts;
-                                        const maxPreview = 320;
-                                        return (
-                                            <details key={idx} className="rounded-lg border border-border bg-background/10 px-3 py-2 hover:bg-muted/30 overflow-hidden" style={{ wordBreak: 'break-word' }}>
-                                                <summary className="cursor-pointer list-none">
-                                                    <div className="flex items-center justify-between gap-2">
-                                                        <div className="font-semibold text-sm">工具调用</div>
-                                                        <div className="flex items-center gap-2">
-                                                            {ts ? <Badge variant="secondary" className="border border-border bg-transparent">{String(ts)}</Badge> : null}
-                                                            <Badge variant={stage === 'result' ? 'success' : 'warning'}>{String(stage ?? '-')}</Badge>
-                                                            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={(ev) => {
-                                                                ev.preventDefault();
-                                                                openDetail('json', 'BrainToolCall', brainFeed[idx]);
-                                                            }}>详情</button>
-                                                        </div>
-                                                    </div>
-                                                    <div className="mt-1 text-xs text-muted-foreground">{String(name ?? '-')}</div>
-                                                    {args && isTruncated(args, maxPreview) ? <div className="mt-2 text-xs text-muted-foreground">{shortText(args, maxPreview)}</div> : null}
-                                                    {err && isTruncated(err, 240) ? <div className="mt-2 text-xs text-destructive">{shortText(err, 240)}</div> : null}
-                                                    {result && isTruncated(result, maxPreview) ? <div className="mt-2 text-xs text-muted-foreground">{shortText(result, maxPreview)}</div> : null}
-                                                </summary>
-                                                {args ? <div className="mt-2 text-xs whitespace-pre-wrap text-muted-foreground">{String(args)}</div> : null}
-                                                {err ? <div className="mt-2 text-xs whitespace-pre-wrap text-destructive">{String(err)}</div> : null}
-                                                {result ? <div className="mt-2 text-xs whitespace-pre-wrap text-foreground/85">{String(result)}</div> : null}
-                                            </details>
-                                        );
-                                    }
-                                    return (
-                                        <div
-                                            key={idx}
-                                            className="rounded-lg border border-border bg-background/10 px-3 py-2 hover:bg-muted/30 cursor-pointer overflow-hidden"
-                                            onClick={() => openDetail('json', 'BrainFeed', e)}
-                                        >
-                                            <div className="text-xs text-muted-foreground truncate">{JSON.stringify(e)}</div>
+                        <div className="mt-2 rounded-lg border border-border bg-background/20 p-3">
+                            {contextBreakdown.sections.length === 0 ? (
+                                <div className="text-sm text-muted-foreground">决策大脑尚未启动，暂无上下文数据</div>
+                            ) : (() => {
+                                const sectionLabels: Record<string, string> = {
+                                    system_prompt: '系统提示词',
+                                    task_goal: '任务目标',
+                                    agent_runtime: 'Agent 运行状态',
+                                    exploit_idea_list: 'ExploitIdea 列表',
+                                    exploit_chain_list: 'ExploitChain 列表',
+                                    env: '环境信息',
+                                    containers: '容器信息',
+                                    key_info: '关键信息',
+                                    conversation_history: '对话历史',
+                                };
+                                const sectionColors: Record<string, string> = {
+                                    system_prompt: '#6366f1',
+                                    task_goal: '#8b5cf6',
+                                    agent_runtime: '#f59e0b',
+                                    exploit_idea_list: '#10b981',
+                                    exploit_chain_list: '#06b6d4',
+                                    env: '#3b82f6',
+                                    containers: '#64748b',
+                                    key_info: '#a855f7',
+                                    conversation_history: '#ef4444',
+                                };
+                                const total = contextBreakdown.total || 1;
+                                const maxCtx = contextBreakdown.max_context || total;
+                                const usagePct = Math.min(100, (total / maxCtx) * 100);
+                                const sorted = [...contextBreakdown.sections].sort((a, b) => b.tokens - a.tokens);
+                                return (
+                                    <div className="space-y-3">
+                                        {/* Usage bar */}
+                                        <div>
+                                            <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                                                <span>上下文使用率</span>
+                                                <span style={{ color: usagePct > 85 ? '#ef4444' : usagePct > 60 ? '#f59e0b' : '#10b981' }}>{usagePct.toFixed(1)}%</span>
+                                            </div>
+                                            <div style={{ height: 8, borderRadius: 4, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                                                <div style={{
+                                                    height: '100%', borderRadius: 4, width: `${usagePct}%`,
+                                                    background: usagePct > 85 ? '#ef4444' : usagePct > 60 ? '#f59e0b' : '#10b981',
+                                                    transition: 'width 0.5s ease',
+                                                }} />
+                                            </div>
                                         </div>
-                                    );
-                                })}
-                                {brainFeed.length === 0 ? <div className="text-sm text-muted-foreground p-2">暂无决策大脑</div> : null}
-                            </div>
-                        </ScrollArea>
+                                        {/* Stacked bar */}
+                                        <div>
+                                            <div className="text-xs text-muted-foreground mb-1">各部分占比</div>
+                                            <div style={{ display: 'flex', height: 24, borderRadius: 6, overflow: 'hidden', background: 'rgba(255,255,255,0.04)' }}>
+                                                {sorted.filter(s => s.tokens > 0).map((s) => {
+                                                    const pct = (s.tokens / total) * 100;
+                                                    if (pct < 0.5) return null;
+                                                    return (
+                                                        <div
+                                                            key={s.name}
+                                                            title={`${sectionLabels[s.name] || s.name}: ${s.tokens.toLocaleString()} tokens (${pct.toFixed(1)}%)`}
+                                                            style={{
+                                                                width: `${pct}%`, minWidth: pct > 2 ? 2 : 0,
+                                                                background: sectionColors[s.name] || '#94a3b8',
+                                                                transition: 'width 0.5s ease',
+                                                                borderRight: '1px solid rgba(0,0,0,0.2)',
+                                                            }}
+                                                        />
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                        {/* Legend + details */}
+                                        <div className="space-y-1.5">
+                                            {sorted.map((s) => {
+                                                const pct = (s.tokens / total) * 100;
+                                                return (
+                                                    <div key={s.name} className="flex items-center gap-2 text-xs">
+                                                        <div style={{ width: 10, height: 10, borderRadius: 2, background: sectionColors[s.name] || '#94a3b8', flexShrink: 0 }} />
+                                                        <div className="flex-1 text-foreground/80 truncate">{sectionLabels[s.name] || s.name}</div>
+                                                        <div className="text-muted-foreground tabular-nums">{s.tokens.toLocaleString()}</div>
+                                                        <div className="text-muted-foreground tabular-nums w-[48px] text-right">{pct.toFixed(1)}%</div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+                        </div>
                     </div>
                 </div>
             </div>

@@ -57,10 +57,27 @@ func (fm *ToolManager) ToolCallRequest(
 	agentName string,
 	projectName ...string,
 ) (llm.Message, []llm.Message, error) {
+	return fm.ToolCallRequestWithLabel(ctx, cli, messages, model, agentName, "", projectName...)
+}
+
+// ToolCallRequestWithLabel is like ToolCallRequest but also tracks per-agent token usage via agentLabel.
+func (fm *ToolManager) ToolCallRequestWithLabel(
+	ctx context.Context,
+	cli llm.Client,
+	messages []llm.Message,
+	model string,
+	agentName string,
+	agentLabel string,
+	projectName ...string,
+) (llm.Message, []llm.Message, error) {
 	tools := fm.GetTools()
 	count := 0
 	var resp llm.Response
 	var err error
+	opts := llm.RequestLLMOpts{AgentLabel: agentLabel}
+	if len(projectName) > 0 {
+		opts.ProjectName = projectName[0]
+	}
 	for {
 		reqCtx, c := context.WithTimeout(ctx, time.Duration(600)*time.Second)
 		defer c()
@@ -69,7 +86,8 @@ func (fm *ToolManager) ToolCallRequest(
 			d, _ := v.MarshalJSON()
 			size += len(d)
 		}
-		resp, err = llm.RequestLLM(cli, reqCtx, model, messages, tools, projectName...)
+		_ = size
+		resp, err = llm.RequestLLMWithOpts(cli, reqCtx, model, messages, tools, opts)
 		if err == nil || count >= misc.GetMaxTryCount() {
 			break
 		}

@@ -184,6 +184,14 @@ func (cm *SharedContext) GetMsgSize(id string) int {
 	}
 	return c.GetMsgSize(id)
 }
+func (cm *SharedContext) GetMaxHistory() int {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	for _, c := range cm.Contexts {
+		return c.GetMaxHistory()
+	}
+	return 0
+}
 
 // CompressIfNeeded delegates compression to all underlying context managers.
 func (cm *SharedContext) CompressIfNeeded(cli Client, model string) error {

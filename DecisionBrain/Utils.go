@@ -73,12 +73,6 @@ func (db *DecisionBrain) EmitBrainMessage(content string) {
 		"content": content,
 	}
 	db.AppendBrainFeed("BrainMessage", data)
-	if db.webOutputChan != nil {
-		msg := WebMsg{Type: "BrainMessage", Data: data, ProjectName: db.projectName}
-		if b, err := json.Marshal(msg); err == nil {
-			db.trySendWS(string(b))
-		}
-	}
 	db.AppendChatMessage(ChatMessage{
 		Role: "system", Text: content,
 		Ts: time.Now().Format("15:04:05"), PersonaName: "决策大脑", AvatarFile: "system.png",
@@ -173,19 +167,6 @@ func (db *DecisionBrain) SubmitAgentFeedHandler(agentID string, kind string, dat
 	// Push token usage update after each agent LLM response.
 	if kind == "AgentMessage" {
 		db.pushTokenUsage()
-	}
-
-	// ws
-	if db.webOutputChan == nil {
-		return
-	}
-	payload := map[string]interface{}{"agentID": agentID}
-	for k, v := range data {
-		payload[k] = v
-	}
-	msg := WebMsg{Type: kind, Data: payload, ProjectName: db.projectName}
-	if b, err := json.Marshal(msg); err == nil {
-		db.trySendWS(string(b))
 	}
 }
 

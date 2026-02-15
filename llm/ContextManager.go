@@ -103,6 +103,9 @@ func (cm *ContextManager) GetType() string {
 func (cm *ContextManager) GetMsgSize(id string) int {
 	return cm.msgSize
 }
+func (cm *ContextManager) GetMaxHistory() int {
+	return cm.maxHistory
+}
 
 func (cm *ContextManager) AddMessage(x *MessageX) {
 	if len(x.Msg.Content) > misc.GetMessageMaximum() {

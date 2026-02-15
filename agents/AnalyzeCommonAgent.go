@@ -166,7 +166,7 @@ func (c *AnalyzeCommonAgent) executeTask(ctx context.Context, assignment TaskAss
 		}
 		c.memory.LockForLLM()
 		debugLastMessages(c.profile.PersonaName, msgList)
-		assistantMessage, toolMessage, err := c.client.ToolCallRequest(ctx, llm.GetResponsesClient("analyze", "main_setting"), msgList, model, c.Name(), c.task.GetProjectName())
+		assistantMessage, toolMessage, err := c.client.ToolCallRequestWithLabel(ctx, llm.GetResponsesClient("analyze", "main_setting"), msgList, model, c.Name(), c.profile.PersonaName, c.task.GetProjectName())
 		if err != nil {
 			c.memory.UnlockForLLM()
 			return &StartResp{Err: err}

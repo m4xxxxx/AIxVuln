@@ -429,11 +429,20 @@ func (db *DecisionBrain) GetDigitalHumanRoster() map[string]interface{} {
 		QueueLength    int    `json:"queue_length"`
 		LastSummary    string `json:"last_summary,omitempty"`
 		LastTask       string `json:"last_task,omitempty"`
+		ContextSize    int    `json:"context_size"`
+		MaxContext     int    `json:"max_context"`
 	}
 
 	busyByTool := make(map[string][]rosterItem)
 	for aid, b := range db.digitalHumanBusy {
 		dhID := strings.TrimSpace(b.Profile.DigitalHumanID)
+		var ctxSize, maxCtx int
+		if b.Agent != nil {
+			if mem := b.Agent.GetMemory(); mem != nil {
+				ctxSize = mem.GetMsgSize(b.Agent.GetId())
+				maxCtx = mem.GetMaxHistory()
+			}
+		}
 		busyByTool[b.AgentToolName] = append(busyByTool[b.AgentToolName], rosterItem{
 			DigitalHumanID: dhID,
 			PersonaName:    strings.TrimSpace(b.Profile.PersonaName),
@@ -446,6 +455,8 @@ func (db *DecisionBrain) GetDigitalHumanRoster() map[string]interface{} {
 			QueueLength:    len(db.digitalHumanQueue[b.AgentToolName]),
 			LastSummary:    db.lastSummary[dhID],
 			LastTask:       db.lastTask[dhID],
+			ContextSize:    ctxSize,
+			MaxContext:     maxCtx,
 		})
 	}
 
@@ -455,6 +466,13 @@ func (db *DecisionBrain) GetDigitalHumanRoster() map[string]interface{} {
 		for _, entry := range pool {
 			p := entry.Profile
 			dhID := strings.TrimSpace(p.DigitalHumanID)
+			var ctxSize, maxCtx int
+			if entry.Agent != nil {
+				if mem := entry.Agent.GetMemory(); mem != nil {
+					ctxSize = mem.GetMsgSize(entry.Agent.GetId())
+					maxCtx = mem.GetMaxHistory()
+				}
+			}
 			items = append(items, rosterItem{
 				DigitalHumanID: dhID,
 				PersonaName:    strings.TrimSpace(p.PersonaName),
@@ -466,6 +484,8 @@ func (db *DecisionBrain) GetDigitalHumanRoster() map[string]interface{} {
 				QueueLength:    len(db.digitalHumanQueue[toolName]),
 				LastSummary:    db.lastSummary[dhID],
 				LastTask:       db.lastTask[dhID],
+				ContextSize:    ctxSize,
+				MaxContext:     maxCtx,
 			})
 		}
 		items = append(items, busyByTool[toolName]...)
@@ -1154,10 +1174,19 @@ func (db *DecisionBrain) startAgentWithFollowUp(name string, args string, follow
 	{
 		var argsMap map[string]interface{}
 		_ = json.Unmarshal([]byte(args), &argsMap)
+		isReport := strings.Contains(name, "Report")
 		if eid, ok := argsMap["exploit_idea_id"]; ok && fmt.Sprint(eid) != "" {
-			assignText = "@" + senderPersonaName + " 验证任务: 请验证 ExploitIdea " + fmt.Sprint(eid)
+			if isReport {
+				assignText = "@" + senderPersonaName + " 报告任务: 请为 ExploitIdea " + fmt.Sprint(eid) + " 撰写漏洞报告"
+			} else {
+				assignText = "@" + senderPersonaName + " 验证任务: 请验证 ExploitIdea " + fmt.Sprint(eid)
+			}
 		} else if cid, ok := argsMap["exploit_chain_id"]; ok && fmt.Sprint(cid) != "" {
-			assignText = "@" + senderPersonaName + " 验证任务: 请验证 ExploitChain " + fmt.Sprint(cid)
+			if isReport {
+				assignText = "@" + senderPersonaName + " 报告任务: 请为 ExploitChain " + fmt.Sprint(cid) + " 撰写漏洞报告"
+			} else {
+				assignText = "@" + senderPersonaName + " 验证任务: 请验证 ExploitChain " + fmt.Sprint(cid)
+			}
 		} else {
 			taskContent := ""
 			if tc, ok := argsMap["task_content"]; ok {
@@ -1626,24 +1655,45 @@ func (db *DecisionBrain) pushTokenUsage() {
 	if db.webOutputChan == nil {
 		return
 	}
-	usage := llm.GetProjectTokenUsage(db.projectName).Snapshot()
+	pu := llm.GetProjectTokenUsage(db.projectName)
+	usage := pu.Snapshot()
 	msg := WebMsg{Type: "TokenUsage", Data: map[string]interface{}{
 		"prompt_tokens":     usage.PromptTokens,
 		"completion_tokens": usage.CompletionTokens,
 		"total_tokens":      usage.TotalTokens,
+		"agents":            pu.AgentSnapshots(),
 	}, ProjectName: db.projectName}
 	if b, err := json.Marshal(msg); err == nil {
 		db.trySendWS(string(b))
 	}
 }
 
+// pushContextBreakdown sends the current brain context token breakdown to the frontend via WebSocket.
+func (db *DecisionBrain) pushContextBreakdown() {
+	if db.webOutputChan == nil {
+		return
+	}
+	bd := db.memory.GetContextBreakdown()
+	msg := WebMsg{Type: "BrainContextBreakdown", Data: bd, ProjectName: db.projectName}
+	if b, err := json.Marshal(msg); err == nil {
+		db.trySendWS(string(b))
+	}
+}
+
+// GetContextBreakdown returns the current brain context token breakdown.
+func (db *DecisionBrain) GetContextBreakdown() ContextBreakdown {
+	return db.memory.GetContextBreakdown()
+}
+
 // GetTokenUsage returns the current cumulative token usage for this project.
 func (db *DecisionBrain) GetTokenUsage() map[string]interface{} {
-	usage := llm.GetProjectTokenUsage(db.projectName).Snapshot()
+	pu := llm.GetProjectTokenUsage(db.projectName)
+	usage := pu.Snapshot()
 	return map[string]interface{}{
 		"prompt_tokens":     usage.PromptTokens,
 		"completion_tokens": usage.CompletionTokens,
 		"total_tokens":      usage.TotalTokens,
+		"agents":            pu.AgentSnapshots(),
 	}
 }
 

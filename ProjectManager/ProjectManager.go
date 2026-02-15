@@ -488,6 +488,13 @@ func (pm *ProjectManager) GetTokenUsage() map[string]interface{} {
 	return pm.decisionBrain.GetTokenUsage()
 }
 
+func (pm *ProjectManager) GetContextBreakdown() interface{} {
+	if pm.decisionBrain == nil {
+		return map[string]interface{}{"sections": []interface{}{}, "total": 0, "max_context": 0}
+	}
+	return pm.decisionBrain.GetContextBreakdown()
+}
+
 func (pm *ProjectManager) SetEnvInfo(env map[string]interface{}) {
 	pm.envInfo = env
 }

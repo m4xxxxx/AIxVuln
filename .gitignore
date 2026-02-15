@@ -2,3 +2,5 @@
 /data/
 /.idea
 /release/
+/dist/
+/build_all.sh

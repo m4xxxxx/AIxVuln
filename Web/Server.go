@@ -105,9 +105,9 @@ func (s *Server) StartWebServerWithUIFS(port string, uiFS fs.FS) {
 func (s *Server) Handler(uiFS fs.FS) http.Handler {
 	// 启动时加载历史数据，保证重启后不丢失
 	s.LoadProjectManagerFromFile()
+	gin.SetMode(gin.ReleaseMode)
 
 	r := gin.Default()
-	gin.SetMode(gin.ReleaseMode)
 	// Avoid automatic 301 redirects (e.g. path normalization) which can cause redirect loops
 	// under some proxies / clients.
 	r.RedirectTrailingSlash = false
@@ -202,12 +202,10 @@ func (s *Server) Handler(uiFS fs.FS) http.Handler {
 	authorized.GET("/projects/:name/start", s.startProject)
 	authorized.GET("/projects/:name/cancel", s.cancelProject)
 	authorized.GET("/projects/:name/agents", s.agentList)
-	authorized.GET("/projects/:name/agents/:agentId/feed", s.agentFeedList)
 	authorized.GET("/projects/:name/exploitIdeas", s.exploitIdeaList)
 	authorized.GET("/projects/:name/exploitChains", s.exploitChainList)
 	authorized.GET("/projects/:name/containers", s.containerList)
 	authorized.GET("/projects/:name/events", s.eventList)
-	authorized.GET("/projects/:name/brainfeed", s.brainFeedList)
 	authorized.GET("/projects/:name/reports", s.reportList)
 	authorized.GET("/projects/:name/envinfo", s.getEnvInfo)
 	authorized.GET("/projects/:name/reports/download/:id", s.downloadReport)
@@ -215,6 +213,7 @@ func (s *Server) Handler(uiFS fs.FS) http.Handler {
 	authorized.POST("/projects/:name/chat", s.teamChat)
 	authorized.GET("/projects/:name/chat/messages", s.getChatMessages)
 	authorized.GET("/projects/:name/token_usage", s.getTokenUsage)
+	authorized.GET("/projects/:name/context_breakdown", s.getContextBreakdown)
 	authorized.GET("/config", s.getConfig)
 	authorized.PUT("/config", s.setConfig)
 	authorized.GET("/models", s.listModels)

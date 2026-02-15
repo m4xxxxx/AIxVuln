@@ -73,6 +73,11 @@ func (r *AgentRuntime) GetRunInfoFull() map[string]interface{} {
 	rs["RUNTask"] = taskContent
 	rs["StartedAt"] = r.startedAt.Format("2006-01-02 15:04:05")
 	rs["RUNSummary"] = r.Resp.Summary
+	// Expose agent context usage for UI progress bar.
+	if mem := r.agent.GetMemory(); mem != nil {
+		rs["context_size"] = mem.GetMsgSize(r.agent.GetId())
+		rs["max_context"] = mem.GetMaxHistory()
+	}
 	return rs
 }
 

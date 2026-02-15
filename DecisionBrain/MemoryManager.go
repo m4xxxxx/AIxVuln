@@ -60,6 +60,19 @@ Use <UserMessage>...</UserMessage> tags to communicate with the user. The conten
 - Proactively notifying the user of important progress at key milestones (e.g. "已安排张伟进行环境搭建", "已让李娜开始代码审计", "温舒然发现了SQL注入线索", "所有任务已完成")
 If there is nothing to tell the user, do NOT include a UserMessage tag.`
 
+// ContextBreakdownSection represents the token size of one section in the brain context.
+type ContextBreakdownSection struct {
+	Name   string `json:"name"`
+	Tokens int    `json:"tokens"`
+}
+
+// ContextBreakdown holds the per-section token breakdown of the brain context.
+type ContextBreakdown struct {
+	Sections   []ContextBreakdownSection `json:"sections"`
+	Total      int                       `json:"total"`
+	MaxContext int                       `json:"max_context"`
+}
+
 type BrainMemory struct {
 	systemPrompt            string
 	memory                  []llm.Turn
@@ -81,6 +94,7 @@ type BrainMemory struct {
 	lastPanelSectionHash    map[string]string
 	lastPanelSectionContent map[string]string
 	seenAgentRuntime        map[string]bool
+	contextBreakdown        ContextBreakdown
 }
 
 func NewBrainMemory() *BrainMemory {
@@ -715,5 +729,41 @@ func (br *BrainMemory) GetContext() []llm.Message {
 	}
 
 	br.msgSize = llm.CountMessagesTokens(messages)
+
+	// Compute per-section token breakdown for UI display.
+	sections := []ContextBreakdownSection{
+		{Name: "system_prompt", Tokens: llm.CountTokens(br.systemPrompt)},
+		{Name: "task_goal", Tokens: llm.CountTokens(br.taskContent)},
+	}
+	if br.lastPanelSectionContent != nil {
+		for _, k := range []string{"agent_runtime", "exploit_idea_list", "exploit_chain_list", "env", "containers", "key_info"} {
+			if c, ok := br.lastPanelSectionContent[k]; ok {
+				sections = append(sections, ContextBreakdownSection{Name: k, Tokens: llm.CountTokens(c)})
+			}
+		}
+	}
+	// Conversation history tokens = total - system prompt - status panel
+	panelTokens := 0
+	for _, s := range sections {
+		panelTokens += s.Tokens
+	}
+	historyTokens := br.msgSize - panelTokens
+	if historyTokens < 0 {
+		historyTokens = 0
+	}
+	sections = append(sections, ContextBreakdownSection{Name: "conversation_history", Tokens: historyTokens})
+	br.contextBreakdown = ContextBreakdown{
+		Sections:   sections,
+		Total:      br.msgSize,
+		MaxContext: br.maxHistory,
+	}
+
 	return messages
+}
+
+// GetContextBreakdown returns the latest per-section token breakdown.
+func (br *BrainMemory) GetContextBreakdown() ContextBreakdown {
+	br.mu.RLock()
+	defer br.mu.RUnlock()
+	return br.contextBreakdown
 }

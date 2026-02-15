@@ -1,17 +1,20 @@
+//go:build gui
+
 package main
 
 import (
-	"AIxVuln/Web"
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"strconv"
 )
 
 // App struct
 type App struct {
-	ctx context.Context
+	ctx        context.Context
 	apiBaseURL string
+	ginHandler http.Handler
 }
 
 // NewApp creates a new App application struct
@@ -19,15 +22,25 @@ func NewApp() *App {
 	return &App{}
 }
 
+// SetGinHandler sets the shared Gin handler so the standalone HTTP listener
+// (needed for WebSocket) uses the same server instance as the Wails middleware.
+func (a *App) SetGinHandler(h http.Handler) {
+	a.ginHandler = h
+}
+
 // startup is called when the app starts. The context is saved
-// so we can call the runtime methods
+// so we can call the runtime methods.
+// It also starts a standalone HTTP listener on a free port so that WebSocket
+// connections (which Wails AssetServer cannot proxy) work correctly.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	if a.ginHandler == nil {
+		return
+	}
 	port := preferPortOrFree(9999)
 	a.apiBaseURL = "http://127.0.0.1:" + strconv.Itoa(port)
 	go func() {
-		server := Web.NewServer()
-		server.StartWebServer(strconv.Itoa(port))
+		_ = http.ListenAndServe("127.0.0.1:"+strconv.Itoa(port), a.ginHandler)
 	}()
 }
 

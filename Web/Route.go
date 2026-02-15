@@ -115,41 +115,6 @@ func (s *Server) eventList(c *gin.Context) {
 	c.JSON(200, Success(pm.GetEvent(countInt)))
 }
 
-func (s *Server) brainFeedList(c *gin.Context) {
-	s.mu.RLock()
-	pm, exists := s.pms[c.Param("name")]
-	s.mu.RUnlock()
-	if !exists {
-		c.JSON(404, Fail("project not found"))
-		return
-	}
-	count := c.DefaultQuery("count", "50")
-	countInt, err := strconv.Atoi(count)
-	if err != nil {
-		c.JSON(400, Fail("count not int"))
-		return
-	}
-	c.JSON(200, Success(pm.GetBrainFeed(countInt)))
-}
-
-func (s *Server) agentFeedList(c *gin.Context) {
-	s.mu.RLock()
-	pm, exists := s.pms[c.Param("name")]
-	s.mu.RUnlock()
-	if !exists {
-		c.JSON(404, Fail("project not found"))
-		return
-	}
-	agentID := c.Param("agentId")
-	count := c.DefaultQuery("count", "50")
-	countInt, err := strconv.Atoi(count)
-	if err != nil {
-		c.JSON(400, Fail("count not int"))
-		return
-	}
-	c.JSON(200, Success(pm.GetAgentFeed(agentID, countInt)))
-}
-
 func (s *Server) reportList(c *gin.Context) {
 	s.mu.RLock()
 	pm, exists := s.pms[c.Param("name")]
@@ -264,6 +229,17 @@ func (s *Server) getTokenUsage(c *gin.Context) {
 	c.JSON(200, Success(pm.GetTokenUsage()))
 }
 
+func (s *Server) getContextBreakdown(c *gin.Context) {
+	s.mu.RLock()
+	pm, exists := s.pms[c.Param("name")]
+	s.mu.RUnlock()
+	if !exists {
+		c.JSON(404, Fail("project not found"))
+		return
+	}
+	c.JSON(200, Success(pm.GetContextBreakdown()))
+}
+
 func (s *Server) getProject(c *gin.Context) {
 	res := make(map[string]any)
 	s.mu.RLock()
@@ -291,7 +267,6 @@ func (s *Server) getProject(c *gin.Context) {
 	res["exploitChains"] = pm.GetExploitChainList()
 	res["agentRuns"] = pm.GetAgentRuntimeList()
 	res["digitalHumans"] = pm.GetDigitalHumanRoster()
-	res["brainFeed"] = pm.GetBrainFeed(80)
 	report := make(map[string]string)
 	for k, v := range pm.GetReportList() {
 		report[k] = filepath.Base(v)

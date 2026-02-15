@@ -144,7 +144,7 @@ func (c *ProjectOverviewAgent) executeTask(ctx context.Context, assignment TaskA
 		if msgList == nil {
 			return &StartResp{Err: fmt.Errorf("agent task not set")}
 		}
-		assistantMessage, toolMessage, err := c.client.ToolCallRequest(ctx, llm.GetResponsesClient("overview", "main_setting"), msgList, model, c.Name(), c.task.GetProjectName())
+		assistantMessage, toolMessage, err := c.client.ToolCallRequestWithLabel(ctx, llm.GetResponsesClient("overview", "main_setting"), msgList, model, c.Name(), "ProjectOverview", c.task.GetProjectName())
 		if err != nil {
 			return &StartResp{Err: err}
 		}

@@ -1,3 +1,5 @@
+//go:build gui
+
 package main
 
 import (
@@ -55,6 +57,7 @@ func main() {
 
 	// Create an instance of the app structure
 	app := NewApp()
+	app.SetGinHandler(ginHandler)
 
 	// Create application with options
 	var err error

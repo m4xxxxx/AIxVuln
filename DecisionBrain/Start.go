@@ -177,6 +177,8 @@ func (db *DecisionBrain) ToolCallRequest(msgList []llm.Message) (llm.Message, []
 			} else {
 				db.AppendBrainFeed(typ, map[string]interface{}{"value": data})
 			}
+			// No longer push execution process to frontend.
+			return
 		}
 		if db.webOutputChan == nil {
 			return
@@ -196,7 +198,7 @@ func (db *DecisionBrain) ToolCallRequest(msgList []llm.Message) (llm.Message, []
 	for {
 		ctx, c := context.WithTimeout(db.ctx, time.Duration(600)*time.Second)
 		defer c()
-		resp, err = llm.RequestLLM(cli, ctx, db.model, msgList, tools, db.projectName)
+		resp, err = llm.RequestLLMWithOpts(cli, ctx, db.model, msgList, tools, llm.RequestLLMOpts{ProjectName: db.projectName, AgentLabel: "决策大脑"})
 		if err == nil || count >= misc.GetMaxTryCount() {
 			break
 		}
@@ -208,6 +210,7 @@ func (db *DecisionBrain) ToolCallRequest(msgList []llm.Message) (llm.Message, []
 	}
 	message := llm.ResponseToMessage(resp)
 	db.pushTokenUsage()
+	db.pushContextBreakdown()
 	misc.Debug("决策大脑： %s 本次请求消息大小 %d", message.Content, db.memory.GetMsgSize())
 	sendWS("BrainMessage", map[string]interface{}{
 		"role":    message.Role,
