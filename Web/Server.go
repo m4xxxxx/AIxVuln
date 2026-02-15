@@ -251,6 +251,9 @@ func (s *Server) Handler(uiFS fs.FS) http.Handler {
 func (s *Server) startWebServer(port string, uiFS fs.FS) {
 	h := s.Handler(uiFS)
 	httpServer := &http.Server{Addr: "0.0.0.0:" + port, Handler: h}
+	fmt.Println("AIxVuln Web Server started")
+	fmt.Println("  ➜ Local:   http://127.0.0.1:" + port)
+	fmt.Println("  ➜ Network: http://0.0.0.0:" + port)
 	go func() {
 		_ = httpServer.ListenAndServe()
 	}()

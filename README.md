@@ -28,18 +28,24 @@ AIxVuln 是一个基于大模型（LLM）+ 工具调用（Function Calling）+ D
 
 | 版本 | 说明 |
 |------|------|
-| `AIxVulnGUI-*` | 桌面客户端（Wails GUI），macOS 为 `.app` |
-| `AIxVulnWeb-*` | Web-only 版本，适合服务器部署 |
+| `AIxVuln-gui-*` | 桌面客户端（Wails GUI） |
+| `AIxVuln-web-*` | Web-only 版本，适合服务器部署 |
 
 ```bash
-# Web 版本示例
-chmod +x AIxVulnWeb-linux-amd64
-./AIxVulnWeb-linux-amd64 --mode web --port 9999
+# Web 版本 — 直接运行，默认监听 9999 端口
+chmod +x AIxVuln-web-linux-amd64
+./AIxVuln-web-linux-amd64
+
+# 自定义端口
+./AIxVuln-web-linux-amd64 -port 8080
+
+# GUI 版本 — 直接运行，自动打开桌面窗口
+./AIxVuln-gui-darwin-arm64
 ```
 
 **首次启动流程：**
 
-1. 打开浏览器访问 `http://IP:9999`（桌面版自动打开）
+1. 打开浏览器访问 `http://IP:9999`（桌面版自动打开，Web 版默认端口 `9999`）
 2. 进入初始化向导 → 创建管理员账户
 3. 向导自动检测 Docker 镜像 → 一键构建 `aisandbox` 和 `java_env`（Dockerfile 已嵌入二进制，无需额外文件）
 4. 完成初始化 → 登录系统
@@ -71,10 +77,21 @@ go run .
 ### 构建发布版
 
 ```bash
-bash build_release.sh
+# 一键交叉编译全部版本（WEB 6平台 + GUI macOS）
+./build_all.sh
+
+# 仅构建 WEB 版（全平台，纯 Go，无需 CGO）
+./build_all.sh web
+
+# 仅构建 GUI 版
+./build_all.sh gui
+
+# 指定平台
+./build_all.sh web linux
+./build_all.sh gui darwin
 ```
 
-自动检测当前系统架构，在 `release/` 目录生成 GUI 版本和 Web-only 版本。
+产出在 `dist/` 目录，命名格式为 `AIxVuln-{web|gui}-{os}-{arch}`。
 
 ### 桌面客户端开发
 

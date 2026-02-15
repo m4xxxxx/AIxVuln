@@ -7,7 +7,6 @@
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "wailsjsdir": "./frontend",
-  "tags": "gui",
   "author": {
     "name": "m4xxxxx",
     "email": "1358690893@qq.com"
