@@ -281,7 +281,7 @@ func (cm *ContextManager) GetContext(id string) []Message {
 	if len(cm.systemPrompt) == 0 {
 		return nil
 	}
-	systemPrompt := cm.systemPrompt
+	systemPrompt := cm.systemPrompt + "\n\nCurrent time: " + time.Now().Format("2006-01-02 15:04:05")
 	if strings.TrimSpace(cm.extraSystemPrompt) != "" {
 		systemPrompt = systemPrompt + "\n\n" + cm.extraSystemPrompt
 	}

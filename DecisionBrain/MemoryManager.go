@@ -451,7 +451,7 @@ func (br *BrainMemory) GetContext() []llm.Message {
 	messages := make([]llm.Message, 0, len(flat)+3)
 	messages = append(messages, llm.Message{
 		Role:    llm.RoleSystem,
-		Content: br.systemPrompt,
+		Content: br.systemPrompt + "\n\nCurrent time: " + time.Now().Format("2006-01-02 15:04:05"),
 	})
 	userPrompt := ""
 	if br.taskContent != "" {
