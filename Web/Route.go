@@ -607,8 +607,11 @@ func initStatusHandler(c *gin.Context) {
 		lines := strings.Split(string(output), "\n")
 		for _, line := range lines {
 			name := strings.TrimSpace(line)
-			if _, ok := images[name]; ok {
-				images[name] = true
+			switch name {
+			case "aisandbox", "aixvuln/aisandbox":
+				images["aisandbox"] = true
+			case "java_env", "aixvuln/java_env":
+				images["java_env"] = true
 			}
 		}
 	}

@@ -61,11 +61,12 @@ func (dm *DockerManager) SetEventHandler(handler func(infoJson string)) {
 }
 
 func (dm *DockerManager) DockerRun(ctx context.Context, config *RunConfig) (*RunResult, error) {
-	if err := pullImageIfNotExists(ctx, dm.cli, config.Image); err != nil {
+	resolvedImage, err := pullImageIfNotExists(ctx, dm.cli, config.Image)
+	if err != nil {
 		return nil, fmt.Errorf("拉取镜像失败: %w", err)
 	}
 	containerConfig := &container.Config{
-		Image:      config.Image,
+		Image:      resolvedImage,
 		Cmd:        config.Cmd,
 		Env:        config.Env,
 		Tty:        false,
@@ -369,31 +370,64 @@ func formatPorts(ports []types.Port) string {
 }
 
 // 拉取镜像（如果不存在）
-func pullImageIfNotExists(ctx context.Context, cli *client.Client, image string) error {
+func pullImageIfNotExists(ctx context.Context, cli *client.Client, image string) (string, error) {
+	aliases := imageAliases(image)
 	// 检查镜像是否存在
 	images, err := cli.ImageList(ctx, image2.ListOptions{})
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	for _, img := range images {
 		for _, tag := range img.RepoTags {
-			if tag == image || strings.HasPrefix(tag, image+":") {
-				return nil // 镜像已存在
+			for _, alias := range aliases {
+				if tag == alias || strings.HasPrefix(tag, alias+":") {
+					return alias, nil // 镜像已存在
+				}
 			}
 		}
 	}
 
-	// 拉取镜像
-	out, err := cli.ImagePull(ctx, image, image2.PullOptions{})
-	if err != nil {
-		return err
-	}
-	defer out.Close()
+	// 拉取镜像（优先尝试命名空间镜像）
+	for _, alias := range aliases {
+		out, pullErr := cli.ImagePull(ctx, alias, image2.PullOptions{})
+		if pullErr != nil {
+			continue
+		}
+		defer out.Close()
 
-	// 等待拉取完成
-	_, err = io.Copy(io.Discard, out)
-	return err
+		// 等待拉取完成
+		if _, copyErr := io.Copy(io.Discard, out); copyErr != nil {
+			return "", copyErr
+		}
+		return alias, nil
+	}
+
+	return "", fmt.Errorf("镜像不存在且拉取失败: %s (尝试别名: %s)", image, strings.Join(aliases, ", "))
+}
+
+func imageAliases(image string) []string {
+	seen := map[string]bool{}
+	aliases := make([]string, 0, 2)
+	add := func(v string) {
+		v = strings.TrimSpace(v)
+		if v == "" || seen[v] {
+			return
+		}
+		seen[v] = true
+		aliases = append(aliases, v)
+	}
+
+	add(image)
+	if !strings.Contains(image, "/") {
+		add("aixvuln/" + image)
+	} else if strings.HasPrefix(image, "aixvuln/") {
+		base := strings.TrimPrefix(image, "aixvuln/")
+		if !strings.Contains(base, "/") {
+			add(base)
+		}
+	}
+	return aliases
 }
 
 // 简便的 Run 函数，支持选项模式，支持超时（秒，0为永不超时）
