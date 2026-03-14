@@ -2,7 +2,6 @@ package misc
 
 import (
 	"fmt"
-	"log"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -13,7 +12,7 @@ import (
 func GetConfigValueRequired(section, key string) string {
 	value := strings.TrimSpace(dbGet(section, key))
 	if value == "" {
-		log.Fatal(fmt.Sprintf("配置为空 %s:%s — 请在设置面板中填写", section, key))
+		PanicWithStack("配置为空 %s:%s — 请在设置面板中填写", section, key)
 	}
 	return value
 }
@@ -47,7 +46,7 @@ func GetMaxContext(sections ...string) int {
 	num := GetConfigValueDefault("main_setting", "MaxContext", "32")
 	kb, err := strconv.Atoi(num)
 	if err != nil {
-		log.Fatal(err)
+		PanicWithStack("MaxContext 配置解析失败: %v", err)
 	}
 	return kb * 1024
 }
@@ -56,7 +55,16 @@ func GetMaxTryCount() int {
 	num := GetConfigValueDefault("misc", "MaxTryCount", "3")
 	result, err := strconv.Atoi(num)
 	if err != nil {
-		log.Fatal(err)
+		PanicWithStack("MaxTryCount 配置解析失败: %v", err)
+	}
+	return result
+}
+
+func GetProjectTaskMaxConcurrency() int {
+	num := GetConfigValueDefault("misc", "PROJECT_TASK_MAX_CONCURRENCY", "2")
+	result, err := strconv.Atoi(num)
+	if err != nil || result < 1 {
+		return 1
 	}
 	return result
 }
@@ -65,7 +73,7 @@ func GetMessageMaximum() int {
 	num := GetConfigValueDefault("misc", "MessageMaximum", "10240")
 	result, err := strconv.Atoi(num)
 	if err != nil {
-		log.Fatal(err)
+		PanicWithStack("MessageMaximum 配置解析失败: %v", err)
 	}
 	return result
 }

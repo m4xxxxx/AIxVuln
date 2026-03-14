@@ -15,6 +15,8 @@ The report template is as follows:
 - **厂商官网**：
 - **影响产品**：
 - **影响版本**：
+- **报告撰写人**：
+- **报告撰写时间**：
 # 漏洞信息
 - **漏洞名称**：
 - **漏洞描述**：
@@ -26,7 +28,8 @@ The report template is as follows:
 ## 验证环境与运行证据
 ## HTTP请求与响应包（可选）
 ## POC
-## POC运行结果`
+## POC运行结果
+`
 
 const defaultAnalyzeTemplate = `The report template is as follows:
 # 漏洞信息

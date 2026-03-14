@@ -19,14 +19,32 @@ type ProjectInfo struct {
 	ProjectName   string                 `json:"projectName"`
 	SourceCodeDir string                 `json:"source_code_dir"`
 	TaskContent   string                 `json:"taskContent"`
+	SandboxID     string                 `json:"sandbox_container_id,omitempty"`
 	StartTime     string                 `json:"start_time"`
 	EndTime       string                 `json:"end_time"`
 	ContainerList []ContainerInfo        `json:"containerList"`
 	VulnList      []Vuln                 `json:"vuln_list"`
+	ExploitIdeas  []*ExploitIdea         `json:"exploit_ideas,omitempty"`
+	ExploitChains []*ExploitChain        `json:"exploit_chains,omitempty"`
+	TokenUsage    TokenUsageSnapshot     `json:"token_usage,omitempty"`
 	EventList     []string               `json:"event_list"`
 	EnvInfo       map[string]interface{} `json:"envInfo"`
 	ProjectDir    string                 `json:"projectDir"`
 	ReportList    map[string]string      `json:"report_list"`
+}
+
+type AgentTokenUsageSnapshot struct {
+	Label            string `json:"label"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CompletionTokens int64  `json:"completion_tokens"`
+	TotalTokens      int64  `json:"total_tokens"`
+}
+
+type TokenUsageSnapshot struct {
+	PromptTokens     int64                     `json:"prompt_tokens"`
+	CompletionTokens int64                     `json:"completion_tokens"`
+	TotalTokens      int64                     `json:"total_tokens"`
+	Agents           []AgentTokenUsageSnapshot `json:"agents,omitempty"`
 }
 
 type ProjectS struct {

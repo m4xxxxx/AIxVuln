@@ -94,6 +94,8 @@ type DecisionBrain struct {
 	chatFilePath      string
 	chatMessages      []ChatMessage
 	chatMu            sync.Mutex
+	lastChatPersistAt time.Time
+	chatPersistTimer  *time.Timer
 	brainFinished     bool
 	statusHandler     func(status string) // callback to notify ProjectManager of status changes
 }
@@ -105,6 +107,12 @@ type ChatMessage struct {
 	PersonaName string `json:"persona_name,omitempty"`
 	AvatarFile  string `json:"avatar_file,omitempty"`
 }
+
+const (
+	maxDecisionEventList  = 5000
+	maxDecisionChatRecord = 3000
+	chatPersistDebounce   = 2 * time.Second
+)
 
 // digitalHumanEntry holds a persistent agent instance bound to a digital human profile.
 type digitalHumanEntry struct {
@@ -160,6 +168,9 @@ func NewDecisionBrain(projectName string, taskContent string, webOutputChan chan
 	}
 	if chatMessages == nil {
 		chatMessages = make([]ChatMessage, 0)
+	}
+	if len(chatMessages) > maxDecisionChatRecord {
+		chatMessages = append([]ChatMessage(nil), chatMessages[len(chatMessages)-maxDecisionChatRecord:]...)
 	}
 	db := &DecisionBrain{memory: memory,
 		agentHandler:      make(map[string]func(*taskManager.Task, string) (agents.Agent, error)),
@@ -615,6 +626,14 @@ func (db *DecisionBrain) Stop() {
 	if db.store != nil {
 		_ = db.store.Close()
 	}
+	db.chatMu.Lock()
+	if db.chatPersistTimer != nil {
+		db.chatPersistTimer.Stop()
+		db.chatPersistTimer = nil
+	}
+	db.saveChatMessagesLocked()
+	db.lastChatPersistAt = time.Now()
+	db.chatMu.Unlock()
 }
 
 func (db *DecisionBrain) signal() {
@@ -975,7 +994,12 @@ func (db *DecisionBrain) SubmitEventHandler(mod string, msg string, level int) {
 	fmt.Println(mod, msg, level)
 	timeStr := time.Now().Format("2006-01-02 15:04:05")
 	line := fmt.Sprintf("[%s][%s]: %s", timeStr, mod, msg)
+	db.feedMu.Lock()
 	db.eventList = append(db.eventList, line)
+	if len(db.eventList) > maxDecisionEventList {
+		db.eventList = append([]string(nil), db.eventList[len(db.eventList)-maxDecisionEventList:]...)
+	}
+	db.feedMu.Unlock()
 	s := WebMsg{Type: "string", Data: line, ProjectName: db.projectName}
 	js, _ := json.Marshal(s)
 	db.trySendWS(string(js))
@@ -1631,7 +1655,30 @@ func (db *DecisionBrain) TeamChat(raw string, sender string) string {
 func (db *DecisionBrain) AppendChatMessage(msg ChatMessage) {
 	db.chatMu.Lock()
 	db.chatMessages = append(db.chatMessages, msg)
-	db.saveChatMessagesLocked()
+	if len(db.chatMessages) > maxDecisionChatRecord {
+		db.chatMessages = append([]ChatMessage(nil), db.chatMessages[len(db.chatMessages)-maxDecisionChatRecord:]...)
+	}
+	now := time.Now()
+	if db.lastChatPersistAt.IsZero() || now.Sub(db.lastChatPersistAt) >= chatPersistDebounce {
+		db.saveChatMessagesLocked()
+		db.lastChatPersistAt = now
+		if db.chatPersistTimer != nil {
+			db.chatPersistTimer.Stop()
+			db.chatPersistTimer = nil
+		}
+	} else if db.chatPersistTimer == nil {
+		wait := chatPersistDebounce - now.Sub(db.lastChatPersistAt)
+		if wait < 100*time.Millisecond {
+			wait = 100 * time.Millisecond
+		}
+		db.chatPersistTimer = time.AfterFunc(wait, func() {
+			db.chatMu.Lock()
+			defer db.chatMu.Unlock()
+			db.saveChatMessagesLocked()
+			db.lastChatPersistAt = time.Now()
+			db.chatPersistTimer = nil
+		})
+	}
 	db.chatMu.Unlock()
 }
 
@@ -1697,6 +1744,57 @@ func (db *DecisionBrain) GetTokenUsage() map[string]interface{} {
 	}
 }
 
+func (db *DecisionBrain) GetTokenUsageSnapshot() taskManager.TokenUsageSnapshot {
+	pu := llm.GetProjectTokenUsage(db.projectName)
+	usage := pu.Snapshot()
+	agentSnapshots := pu.AgentSnapshots()
+	agents := make([]taskManager.AgentTokenUsageSnapshot, 0, len(agentSnapshots))
+	for _, a := range agentSnapshots {
+		agents = append(agents, taskManager.AgentTokenUsageSnapshot{
+			Label:            a.Label,
+			PromptTokens:     a.PromptTokens,
+			CompletionTokens: a.CompletionTokens,
+			TotalTokens:      a.TotalTokens,
+		})
+	}
+	return taskManager.TokenUsageSnapshot{
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
+		TotalTokens:      usage.TotalTokens,
+		Agents:           agents,
+	}
+}
+
+func (db *DecisionBrain) RestoreTokenUsageSnapshot(snapshot taskManager.TokenUsageSnapshot) {
+	agents := make([]llm.AgentUsageSnapshot, 0, len(snapshot.Agents))
+	for _, a := range snapshot.Agents {
+		agents = append(agents, llm.AgentUsageSnapshot{
+			Label:            a.Label,
+			PromptTokens:     a.PromptTokens,
+			CompletionTokens: a.CompletionTokens,
+			TotalTokens:      a.TotalTokens,
+		})
+	}
+	llm.RestoreProjectTokenUsage(db.projectName, snapshot.PromptTokens, snapshot.CompletionTokens, snapshot.TotalTokens, agents)
+}
+
+func (db *DecisionBrain) RestoreExploitState(ideas []*taskManager.ExploitIdea, chains []*taskManager.ExploitChain) {
+	db.exploitIdeaList = make([]*taskManager.ExploitIdea, 0, len(ideas))
+	for _, one := range ideas {
+		if one != nil {
+			db.exploitIdeaList = append(db.exploitIdeaList, one)
+		}
+	}
+	db.exploitChainList = make([]*taskManager.ExploitChain, 0, len(chains))
+	for _, one := range chains {
+		if one != nil {
+			db.exploitChainList = append(db.exploitChainList, one)
+		}
+	}
+	db.flushExploitIdeaList()
+	db.flushExploitChainList()
+}
+
 // GetChatMessages returns all persisted chat messages.
 func (db *DecisionBrain) GetChatMessages() []ChatMessage {
 	db.chatMu.Lock()
@@ -1760,6 +1858,9 @@ func agentTypeToolInfo(agentToolName string) (typeName string, toolDesc string) 
 	case strings.Contains(agentToolName, "Report"):
 		return "报告数字人（Report）", `可用工具：ListSourceCodeTreeTool、SearchFileContentsByRegexTool、ReadLinesFromFileTool、IssueTool、GuidanceTool、ReportVulnTool（生成报告）、GetExploitIdeaByIdTool、GetExploitChainByIdTool
 限制：只负责撰写漏洞报告，不能执行命令，不能操作环境，只能读取源码和已有的漏洞数据。`
+	case strings.Contains(agentToolName, "General"):
+		return "通用杂项数字人（General）", `可用工具：RunCommandTool、DetectLanguageTool、ListSourceCodeTreeTool、SearchFileContentsByRegexTool、ReadLinesFromFileTool、RunPythonCodeTool、RunPHPCodeTool、RunSQLTool、DockerLogsTool、DockerDirScanTool、DockerFileReadTool、TaskListTool、GuidanceTool、IssueTool，以及已注入的 GitHub MCP 工具
+限制：用于处理杂项任务（例如仓库协作、脚本执行、定位问题等）；涉及高风险环境变更时应先明确目标并谨慎执行。`
 	default:
 		return "未知类型数字人", "工具信息不详。"
 	}

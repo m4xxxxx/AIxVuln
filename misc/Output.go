@@ -2,15 +2,14 @@ package misc
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
 )
 
 var (
-	debugEnabled     bool
-	debugInitOnce    sync.Once
+	debugEnabled  bool
+	debugInitOnce sync.Once
 )
 
 // initDebugFlag reads the DEBUG config from DB once.
@@ -64,7 +63,7 @@ func Error(mod string, msg string, eventHandler func(string, string, int)) {
 		eventHandler(mod, msg, 3)
 		return
 	}
-	log.Fatal(m)
+	fmt.Println(m)
 }
 
 func Debug(format string, v ...any) {

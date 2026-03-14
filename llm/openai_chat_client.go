@@ -4,6 +4,7 @@ import (
 	"AIxVuln/misc"
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/openai/openai-go/v3"
@@ -35,6 +36,12 @@ func (c *OpenAIChatClient) Chat(ctx context.Context, model string, messages []Me
 		Model:    shared.ChatModel(model),
 		Messages: msgs,
 	}
+	maxOutput := c.maxOutputTokens()
+	if maxOutput > 0 {
+		// Keep both fields for better compatibility with OpenAI-compatible providers.
+		params.MaxCompletionTokens = openai.Int(maxOutput)
+		params.MaxTokens = openai.Int(maxOutput)
+	}
 
 	if len(tools) > 0 {
 		params.Tools = toolDefsToChatTools(tools)
@@ -50,6 +57,22 @@ func (c *OpenAIChatClient) Chat(ctx context.Context, model string, messages []Me
 		return c.chatStream(ctx, params)
 	}
 	return c.chatSync(ctx, params)
+}
+
+func (c *OpenAIChatClient) maxOutputTokens() int64 {
+	raw := strings.TrimSpace(misc.GetConfigValueDefault(c.configSection, "MaxOutputTokens",
+		misc.GetConfigValueDefault("main_setting", "MaxOutputTokens", "2048")))
+	if raw == "" {
+		return 2048
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 2048
+	}
+	if n > 8192 {
+		n = 8192
+	}
+	return int64(n)
 }
 
 // chatSync performs a non-streaming Chat Completions request.

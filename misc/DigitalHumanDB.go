@@ -34,14 +34,13 @@ func initDigitalHumanTable() {
 		);
 	`)
 
-	// Insert defaults only if table is empty.
-	var count int
-	configDB.QueryRow(`SELECT COUNT(*) FROM digital_human`).Scan(&count)
-	if count > 0 {
-		return
-	}
-
 	defaults := []DigitalHumanRow{
+		{
+			ID: "7f8a9b0c-2345-4e6f-8a9b-0c1d2e3f4a10", AgentType: "Agent-General-GeneralCommonAgent",
+			PersonaName: "沈墨白", Gender: "男", AvatarFile: "system.png",
+			Personality: "全能协调、实用主义、执行高效", Age: 28,
+			ExtraSysPrompt: "请你在回复时保持务实、直接、可执行的风格。遇到杂项任务时，先快速拆解目标，再给出最短执行路径。涉及 GitHub 仓库协作时优先使用 GitHub MCP 工具，给出明确操作结果和下一步建议。",
+		},
 		{
 			ID: "0f22d7b1-8b6f-4b88-8d9b-7a7b3a1e6a11", AgentType: "Agent-Ops-OpsCommonAgent",
 			PersonaName: "温舒然", Gender: "女", AvatarFile: "opscommon-1.png",

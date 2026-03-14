@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -40,6 +41,7 @@ type ProjectManager struct {
 	isRunning      bool
 	msgChan        chan string
 	envInfo        map[string]interface{}
+	sandboxID      string
 	dm             *dockerManager.DockerManager
 	decisionBrain  *DecisionBrain.DecisionBrain
 	brainRestart   chan struct{}
@@ -96,9 +98,21 @@ func NewProjectManager(project ProjectConfig) (*ProjectManager, error) {
 		return nil, err
 	}
 	sourceCodeDir := filepath.Join(projectDir, "sourceCodeDir")
-	err = misc.CopyDir(project.SourceCodeDir, sourceCodeDir)
+	absSrcDir, err := filepath.Abs(project.SourceCodeDir)
 	if err != nil {
 		return nil, err
+	}
+	absDstDir, err := filepath.Abs(sourceCodeDir)
+	if err != nil {
+		return nil, err
+	}
+	// When restoring projects from persistence, source and destination may already be identical.
+	// Skip copy in that case to avoid expensive no-op/self-overwrite behavior.
+	if absSrcDir != absDstDir {
+		err = misc.CopyDir(project.SourceCodeDir, sourceCodeDir)
+		if err != nil {
+			return nil, err
+		}
 	}
 	pm := ProjectManager{
 		wg:            &sync.WaitGroup{},
@@ -120,8 +134,6 @@ func NewProjectManager(project ProjectConfig) (*ProjectManager, error) {
 	pm.ctx, pm.cancelFunc = context.WithCancel(context.Background())
 	pm.goroutineOps()
 	taskManager.SetDockerManager(pm.projectName, pm.dm)
-	sandbox := dockerManager.NewSandbox(pm.dm, sourceCodeDir)
-	taskManager.SetSandbox(pm.projectName, sandbox)
 	sm := dockerManager.NewServiceManager(sourceCodeDir, pm.dm)
 	taskManager.SetServiceManager(pm.projectName, sm)
 	taskManager.SetGoroutineChan(pm.projectName, pm.goroutine)
@@ -130,13 +142,20 @@ func NewProjectManager(project ProjectConfig) (*ProjectManager, error) {
 		pm.status = status
 	})
 	as, _ := agents.GetAgentDescription()
+	enabledAgentTypes := make(map[string]struct{}, len(as))
 	for _, v := range as {
 		pm.decisionBrain.RegisterAgent(v.Name, v.NewFunc)
+		enabledAgentTypes[v.Name] = struct{}{}
 	}
 	// Load digital human profiles from SQLite.
 	dhMap := misc.GetAllDigitalHumans()
 	pool := make(map[string][]agents.AgentProfile)
 	for agentType, rows := range dhMap {
+		if _, ok := enabledAgentTypes[agentType]; !ok {
+			// Keep non-audit agent profiles in DB, but do not inject them into
+			// the decision brain pool when the corresponding agent is disabled.
+			continue
+		}
 		profiles := make([]agents.AgentProfile, 0, len(rows))
 		for _, r := range rows {
 			profiles = append(profiles, agents.AgentProfile{
@@ -214,10 +233,27 @@ func (pm *ProjectManager) StartTask() {
 	pm.isStopping = false
 	pm.startTime = time.Now().Format("2006-01-02 15:04:05")
 	defer func() {
-		pm.status = "运行结束"
+		if strings.HasPrefix(pm.status, "运行失败") {
+			pm.isRunning = false
+			pm.endTime = time.Now().Format("2006-01-02 15:04:05")
+			return
+		}
+		// If the brain has entered "决策结束", treat this project as paused instead of fully ended.
+		// Keep the status so UI can still show the "结束项目" option.
+		if pm.decisionBrain != nil && pm.decisionBrain.IsBrainFinished() {
+			pm.status = "决策结束"
+		} else {
+			pm.status = "运行结束"
+		}
 		pm.isRunning = false
 		pm.endTime = time.Now().Format("2006-01-02 15:04:05")
 	}()
+
+	if err := pm.ensureSandbox(); err != nil {
+		pm.status = "运行失败: sandbox 初始化失败"
+		misc.Debug("StartTask: sandbox 初始化失败: %v", err)
+		return
+	}
 
 	// ---- Phase 0: Run ProjectOverviewAgent to scan the project before the brain starts. ----
 	pm.status = "项目概览分析中"
@@ -242,21 +278,38 @@ func (pm *ProjectManager) StartTask() {
 		}()
 		pm.wg.Wait()
 
-		// If brain entered "决策结束" state, stay alive and wait for user to
-		// either chat (which restarts the brain) or click "结束项目".
+		// If brain entered "决策结束", do not block this runner.
+		// Return now so the global queue can start the next project.
 		if !pm.decisionBrain.IsBrainFinished() {
 			break
 		}
-		// Block here until TeamChat calls RestartAfterFinished + signals, or StopTask is called.
-		select {
-		case <-pm.brainRestart:
-			// User sent a chat message — loop back and run Start() again.
-			continue
-		case <-pm.ctx.Done():
-			// StopTask was called — exit.
-			return
-		}
+		return
 	}
+}
+
+func (pm *ProjectManager) ensureSandbox() error {
+	if sb, err := taskManager.GetSandbox(pm.projectName); err == nil && sb != nil && sb.ContainerId != "" {
+		pm.sandboxID = sb.ContainerId
+		return nil
+	}
+
+	if strings.TrimSpace(pm.sandboxID) != "" {
+		sb, err := pm.dm.RestoreSandboxByContainerID(pm.sandboxID, pm.sourceCodeDir)
+		if err == nil && sb != nil {
+			taskManager.SetSandbox(pm.projectName, sb)
+			pm.sandboxID = sb.ContainerId
+			return nil
+		}
+		misc.Debug("ensureSandbox: restore sandbox failed for project=%s sandboxID=%s err=%v; creating new sandbox", pm.projectName, pm.sandboxID, err)
+	}
+
+	sb, err := dockerManager.NewSandbox(pm.dm, pm.sourceCodeDir)
+	if err != nil {
+		return err
+	}
+	taskManager.SetSandbox(pm.projectName, sb)
+	pm.sandboxID = sb.ContainerId
+	return nil
 }
 
 // runProjectOverview runs the ProjectOverviewAgent synchronously and returns the summary.
@@ -363,6 +416,10 @@ func (pm *ProjectManager) SetVulns(vuln []taskManager.Vuln) {
 	pm.vulnList = vuln
 }
 func (pm *ProjectManager) SetEvent(event []string) {
+	const maxProjectEventCache = 2000
+	if len(event) > maxProjectEventCache {
+		event = append([]string(nil), event[len(event)-maxProjectEventCache:]...)
+	}
 	pm.eventList = event
 }
 func (pm *ProjectManager) SetProjectDir(dir string) {
@@ -430,6 +487,13 @@ func (pm *ProjectManager) GetExploitChainList() []*taskManager.ExploitChain {
 	return pm.decisionBrain.GetExploitChainList()
 }
 
+func (pm *ProjectManager) RestoreExploitState(ideas []*taskManager.ExploitIdea, chains []*taskManager.ExploitChain) {
+	if pm.decisionBrain == nil {
+		return
+	}
+	pm.decisionBrain.RestoreExploitState(ideas, chains)
+}
+
 func (pm *ProjectManager) GetAgentRuntimeList() []map[string]interface{} {
 	if pm.decisionBrain == nil {
 		return nil
@@ -455,15 +519,10 @@ func (pm *ProjectManager) TeamChat(msg string) string {
 	if pm.decisionBrain == nil {
 		return "project not started"
 	}
-	// If brain has finished and user sends a new message, restart the brain loop.
+	// If the brain has finished, mark it resumable and accept the user message.
+	// Actual execution resume is triggered by project start queue dispatch.
 	if pm.decisionBrain.IsBrainFinished() {
 		pm.decisionBrain.RestartAfterFinished()
-		pm.status = "正在运行"
-		// Signal the StartTask loop to restart the brain.
-		select {
-		case pm.brainRestart <- struct{}{}:
-		default:
-		}
 	}
 	return pm.decisionBrain.TeamChat(msg, "用户")
 }
@@ -486,6 +545,20 @@ func (pm *ProjectManager) GetTokenUsage() map[string]interface{} {
 		return map[string]interface{}{"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 	}
 	return pm.decisionBrain.GetTokenUsage()
+}
+
+func (pm *ProjectManager) GetTokenUsageSnapshot() taskManager.TokenUsageSnapshot {
+	if pm.decisionBrain == nil {
+		return taskManager.TokenUsageSnapshot{}
+	}
+	return pm.decisionBrain.GetTokenUsageSnapshot()
+}
+
+func (pm *ProjectManager) RestoreTokenUsageSnapshot(snapshot taskManager.TokenUsageSnapshot) {
+	if pm.decisionBrain == nil {
+		return
+	}
+	pm.decisionBrain.RestoreTokenUsageSnapshot(snapshot)
 }
 
 func (pm *ProjectManager) GetContextBreakdown() interface{} {
@@ -518,6 +591,7 @@ func (pm *ProjectManager) RemoveDockerAll() {
 			_ = pm.dm.DockerRemove(sb.ContainerId)
 		}
 		taskManager.RemoveSandbox(pm.projectName)
+		pm.sandboxID = ""
 	}
 	// Remove containers tracked by the DecisionBrain (runtime source of truth).
 	if pm.decisionBrain != nil {
@@ -536,4 +610,15 @@ func (pm *ProjectManager) RemoveDockerAll() {
 		}
 		_ = pm.dm.DockerRemove(c.ContainerId)
 	}
+}
+
+func (pm *ProjectManager) SetSandboxContainerID(containerID string) {
+	pm.sandboxID = strings.TrimSpace(containerID)
+}
+
+func (pm *ProjectManager) GetSandboxContainerID() string {
+	if sb, err := taskManager.GetSandbox(pm.projectName); err == nil && sb != nil && sb.ContainerId != "" {
+		pm.sandboxID = sb.ContainerId
+	}
+	return pm.sandboxID
 }

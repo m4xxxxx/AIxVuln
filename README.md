@@ -130,7 +130,7 @@ wails build  # 构建发布版
 
 AIxVuln 中 **Agent** 和 **数字人（Digital Human）** 是两个不同层次的概念：
 
-- **Agent** — 底层**能力类型**，定义了一类任务的执行逻辑、可用工具和系统提示词。共 6 类。
+- **Agent** — 底层**能力类型**，定义了一类任务的执行逻辑、可用工具和系统提示词。共 7 类。
 - **数字人** — 绑定到某类 Agent 能力的**独立人格实例**。每个数字人拥有姓名、性别、年龄、性格、头像和自定义提示词，以持久化实例运行，跨任务复用记忆。
 
 简单来说：**Agent 是能力，数字人是角色**。同一类 Agent 能力可以有多个不同人格的数字人。
@@ -139,6 +139,7 @@ AIxVuln 中 **Agent** 和 **数字人（Digital Human）** 是两个不同层次
 
 | Agent 类型 | 职责 |
 |------------|------|
+| **GeneralCommonAgent** | 通用杂项任务处理（跨域排障、脚本执行、仓库协作；支持 GitHub Copilot MCP） |
 | **OpsCommonAgent** | 多语言环境搭建与运维（识别技术栈、安装依赖、启动服务、获取登录凭证） |
 | **OpsEnvScoutAgent** | 远程环境侦察（从运行环境中获取 EnvInfo 与源码信息） |
 | **AnalyzeCommonAgent** | 代码审计与候选漏洞挖掘（多路并发） |
@@ -152,6 +153,7 @@ AIxVuln 中 **Agent** 和 **数字人（Digital Human）** 是两个不同层次
 
 | 数字人 | Agent 能力 | 人格特点 |
 |--------|-----------|----------|
+| 沈墨白 | General | 全能协调、实用主义、执行高效 |
 | 温舒然 | Ops | 温柔细腻、有条不紊 |
 | 陈景明 | OpsEnvScout | 干练利落、言简意赅 |
 | 林辰宇 | Analyze | 一丝不苟、逻辑缜密 |
@@ -207,7 +209,7 @@ AIxVuln 将漏洞挖掘拆解为可组合的碎片化利用点，再逐步推进
 | `misc` | 全局通用配置（消息长度限制、重试次数、数据目录等） |
 | `main_setting` | 全局默认 LLM 配置（各 Agent 类型未配置时的 fallback） |
 | `decision` | 决策大脑专用配置（可覆盖 main_setting） |
-| `ops` / `analyze` / `verifier` / `report` / `overview` | 各 Agent 类型专用配置（可覆盖 main_setting） |
+| `general` / `ops` / `analyze` / `verifier` / `report` / `overview` | 各 Agent 类型专用配置（可覆盖 main_setting） |
 
 ### 主要配置项
 
@@ -224,8 +226,14 @@ AIxVuln 将漏洞挖掘拆解为可组合的碎片化利用点，再逐步推进
 | `MessageMaximum` | misc | 单条消息最大长度（字符） | `10240` |
 | `MaxTryCount` | misc | API 请求最大重试次数 | `5` |
 | `DATA_DIR` | misc | 数据存储目录 | `./data` |
+| `GITHUB_COPILOT_MCP_AUTHORIZATION` | misc | GitHub Copilot MCP 的 Authorization 请求头值 | 空 |
 
 > 各 Agent 类型配置段（如 `decision`、`ops` 等）支持独立覆盖 `BASE_URL`、`OPENAI_API_KEY`、`MODEL`、`MaxContext`、`MaxRequest`、`USER_AGENT`、`STREAM`、`API_MODE`，未配置时自动 fallback 到 `main_setting`。
+
+### GitHub MCP
+
+系统内置 GitHub Copilot MCP 连接，端点固定为 `https://api.githubcopilot.com/mcp/`，工具前缀固定为 `MCP_GitHubCopilot`。  
+设置页只需要配置 `misc.GITHUB_COPILOT_MCP_AUTHORIZATION`。
 
 ### 模型列表自动获取
 
@@ -307,6 +315,10 @@ ExploitIdea 经过"审核失败 → 正在整改"等多轮状态流转，决策�
 **自主协作** — 多个数字人同时汇报进展、分配剩余配额、用户可随时 @任意数字人 进行干预：
 
 ![团队沟通-自主协作](docs/images/chat-5.png)
+
+**定向开源漏洞挖掘** — 支持通过Github MCP自动添加满足条件的开源项目：
+
+![GitHub-Mcp](docs/images/git-mcp.png)
 
 ### 漏洞报告示例
 

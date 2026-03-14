@@ -49,6 +49,13 @@ func CopyDir(src, dst string) error {
 	src = filepath.Clean(src)
 	dst = filepath.Clean(dst)
 
+	// Guard against copying a directory onto itself.
+	if absSrc, err1 := filepath.Abs(src); err1 == nil {
+		if absDst, err2 := filepath.Abs(dst); err2 == nil && absSrc == absDst {
+			return nil
+		}
+	}
+
 	// 获取源目录信息
 	srcInfo, err := os.Stat(src)
 	if err != nil {
@@ -96,6 +103,13 @@ func CopyDir(src, dst string) error {
 
 // CopyFile 复制单个文件
 func CopyFile(src, dst string) error {
+	// Guard against copying a file onto itself.
+	if absSrc, err1 := filepath.Abs(src); err1 == nil {
+		if absDst, err2 := filepath.Abs(dst); err2 == nil && absSrc == absDst {
+			return nil
+		}
+	}
+
 	// 打开源文件
 	srcFile, err := os.Open(src)
 	if err != nil {

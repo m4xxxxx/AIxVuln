@@ -3,15 +3,13 @@
 package main
 
 import (
+	"AIxVuln/Web"
+	"AIxVuln/misc"
 	"embed"
 	"flag"
 	"io/fs"
-	"log"
 	"net/http"
 	"strings"
-
-	"AIxVuln/Web"
-	"AIxVuln/misc"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -28,7 +26,7 @@ func init() {
 	var err error
 	err = misc.CreateDirIfNotExists("data/temp/")
 	if err != nil {
-		log.Fatal(err)
+		misc.PanicWithStack("创建 data/temp 失败: %v", err)
 	}
 }
 
@@ -45,7 +43,7 @@ func main() {
 	if *mode == "web" {
 		uiFS, err := fs.Sub(assets, "frontend/dist")
 		if err != nil {
-			log.Fatal(err)
+			misc.PanicWithStack("加载前端静态资源失败: %v", err)
 		}
 		srv := Web.NewServer()
 		srv.StartWebServerWithUIFS(*port, uiFS)

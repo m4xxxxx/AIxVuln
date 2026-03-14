@@ -8,6 +8,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -124,12 +126,18 @@ func (c *AnalyzeCommonAgent) executeTask(ctx context.Context, assignment TaskAss
 	}
 	c.config = config
 
+	// Per-task quota state must be reset on every assignment.
+	c.task.ResetExploitIdeaSubmitted()
+	c.task.SetExploitIdeaQuota(0)
+
 	// Inject task content as a user message.
 	taskContent := config.TaskContent
-	if config.ExploitIdeaMaxCount != "" {
-		var maxCount int
-		if _, err := fmt.Sscanf(config.ExploitIdeaMaxCount, "%d", &maxCount); err == nil && maxCount > 0 {
+	if maxCountText := strings.TrimSpace(config.ExploitIdeaMaxCount); maxCountText != "" {
+		maxCount, err := strconv.Atoi(maxCountText)
+		if err == nil && maxCount > 0 {
 			c.task.SetExploitIdeaQuota(maxCount)
+		} else {
+			misc.Debug("%s: invalid exploitIdeaMaxCount=%q, fallback to unlimited per-task quota", c.Name(), config.ExploitIdeaMaxCount)
 		}
 		taskContent += fmt.Sprintf("\nYou can submit a maximum of **%s NEW ExploitIdea** in THIS task (this is your per-task quota, independent of previously discovered ones). Once this limit is reached, immediately stop mining and call AgentFinishTool.", config.ExploitIdeaMaxCount)
 	}

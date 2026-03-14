@@ -128,3 +128,30 @@ func AddProjectAgentTokenUsage(projectName string, agentLabel string, usage Usag
 	pu.Add(usage)
 	pu.AddAgent(agentLabel, usage)
 }
+
+// RestoreProjectTokenUsage overwrites project token usage from persisted snapshot data.
+func RestoreProjectTokenUsage(projectName string, promptTokens, completionTokens, totalTokens int64, agents []AgentUsageSnapshot) {
+	if projectName == "" {
+		return
+	}
+	pu := GetProjectTokenUsage(projectName)
+	pu.PromptTokens.Store(promptTokens)
+	pu.CompletionTokens.Store(completionTokens)
+	pu.TotalTokens.Store(totalTokens)
+
+	agentMap := make(map[string]*AgentTokenUsage, len(agents))
+	for _, a := range agents {
+		if a.Label == "" {
+			continue
+		}
+		au := &AgentTokenUsage{}
+		au.PromptTokens.Store(a.PromptTokens)
+		au.CompletionTokens.Store(a.CompletionTokens)
+		au.TotalTokens.Store(a.TotalTokens)
+		agentMap[a.Label] = au
+	}
+
+	pu.agentMu.Lock()
+	pu.agentUsage = agentMap
+	pu.agentMu.Unlock()
+}

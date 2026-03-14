@@ -1,12 +1,12 @@
 package dockerManager
 
 import (
+	"AIxVuln/misc"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"strings"
 	"time"
 
@@ -22,7 +22,7 @@ import (
 func NewDockerManager() *DockerManager {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
-		log.Fatalln(err)
+		misc.PanicWithStack("初始化 Docker client 失败: %v", err)
 	}
 	return &DockerManager{cli: cli}
 }

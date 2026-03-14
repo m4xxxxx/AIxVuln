@@ -2,7 +2,6 @@ package Web
 
 import (
 	"AIxVuln/DecisionBrain"
-	"AIxVuln/ProjectManager"
 	"AIxVuln/misc"
 	"bufio"
 	"encoding/json"
@@ -13,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -22,12 +22,39 @@ import (
 )
 
 func (s *Server) getPms(c *gin.Context) {
-	var res []string
+	res := make([]map[string]interface{}, 0)
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, v := range s.pms {
-		res = append(res, v.GetProjectName())
+	names := make([]string, 0, len(s.pms))
+	for name := range s.pms {
+		names = append(names, name)
 	}
+	sort.Strings(names)
+	for _, name := range names {
+		pm := s.pms[name]
+		rawStatus := pm.GetStatus()
+		isRunning := rawStatus == "正在运行"
+		queued, queuePos, _ := s.getProjectStartQueueState(name)
+		status := rawStatus
+		if queued && !isRunning {
+			if queuePos > 0 {
+				status = fmt.Sprintf("排队中（第%d位）", queuePos)
+			} else {
+				status = "排队中"
+			}
+		}
+		res = append(res, map[string]interface{}{
+			"projectName":   name,
+			"status":        status,
+			"rawStatus":     rawStatus,
+			"isRunning":     isRunning,
+			"isQueued":      queued,
+			"queuePosition": queuePos,
+			"brainFinished": pm.GetBrainFinished(),
+			"startTime":     pm.GetStartTime(),
+			"endTime":       pm.GetEndTime(),
+		})
+	}
+	s.mu.RUnlock()
 	c.JSON(200, Success(res))
 }
 
@@ -199,7 +226,17 @@ func (s *Server) teamChat(c *gin.Context) {
 	}
 	// Persist user message before sending.
 	pm.AppendChatMessage(DecisionBrain.ChatMessage{Role: "user", Text: body.Message, Ts: time.Now().Format("15:04:05")})
+	wasFinished := pm.GetBrainFinished()
 	result := pm.TeamChat(body.Message)
+	if wasFinished {
+		state, pos := s.enqueueProjectStart(c.Param("name"))
+		queueMsg := formatQueueStartMessage(state, pos)
+		if strings.TrimSpace(result) == "" {
+			result = queueMsg
+		} else {
+			result = result + "；" + queueMsg
+		}
+	}
 	c.JSON(200, Success(result))
 }
 
@@ -274,8 +311,18 @@ func (s *Server) getProject(c *gin.Context) {
 	res["reportList"] = report
 	res["reports"] = report
 	res["status"] = pm.GetStatus()
-	// 给 UI 更容易判断的运行状态 — "决策结束" 也算运行中（项目未真正结束）
-	res["isRunning"] = pm.GetStatus() == "正在运行" || pm.GetStatus() == "决策结束"
+	// "决策结束" is treated as paused and should not be considered actively running.
+	res["isRunning"] = pm.GetStatus() == "正在运行"
+	queued, queuePos, _ := s.getProjectStartQueueState(pm.GetProjectName())
+	res["isQueued"] = queued
+	res["queuePosition"] = queuePos
+	if queued && !res["isRunning"].(bool) {
+		if queuePos > 0 {
+			res["status"] = fmt.Sprintf("排队中（第%d位）", queuePos)
+		} else {
+			res["status"] = "排队中"
+		}
+	}
 	res["brainFinished"] = pm.GetBrainFinished()
 	res["startTime"] = pm.GetStartTime()
 	res["endTime"] = pm.GetEndTime()
@@ -293,13 +340,8 @@ func (s *Server) createProject(c *gin.Context) {
 	}
 
 	projectName := c.DefaultQuery("projectName", "project-"+uuid.New().String())
-	matched, err := regexp.MatchString(`^[a-zA-Z0-9_-]+$`, projectName)
-	if err != nil {
-		c.JSON(400, Fail("ProjectName只允许^[a-zA-Z0-9_-]+$"))
-		return
-	}
-	if !matched {
-		c.JSON(400, Fail("ProjectName只允许^[a-zA-Z0-9_-]+$"))
+	if err := validateProjectName(projectName); err != nil {
+		c.JSON(400, Fail(err.Error()))
 		return
 	}
 
@@ -404,62 +446,34 @@ func (s *Server) createProject(c *gin.Context) {
 		return
 	}
 
-	// Flatten single top-level directory wrapper.
-	// Archives often contain a single root folder (e.g., project-name/src/...).
-	// Unwrap it so source files sit directly in tempDir.
-	if entries, err := os.ReadDir(tempDir); err == nil {
-		dirs, files := 0, 0
-		var singleDir string
-		for _, e := range entries {
-			if e.IsDir() {
-				// Skip .git directory when counting
-				if e.Name() == ".git" {
-					continue
-				}
-				dirs++
-				singleDir = e.Name()
-			} else {
-				files++
-			}
-		}
-		if dirs == 1 && files == 0 {
-			nested := filepath.Join(tempDir, singleDir)
-			if subEntries, err := os.ReadDir(nested); err == nil {
-				for _, se := range subEntries {
-					src := filepath.Join(nested, se.Name())
-					dst := filepath.Join(tempDir, se.Name())
-					_ = os.Rename(src, dst)
-				}
-				_ = os.Remove(nested)
-			}
-		}
-	}
-
-	projectConfig := ProjectManager.ProjectConfig{ProjectName: projectName, SourceCodeDir: tempDir, MsgChan: s.msgChan, TaskContent: taskContent}
-	pm, err := ProjectManager.NewProjectManager(projectConfig)
-	if err != nil {
+	flattenSingleRootDirectory(tempDir)
+	if err := s.createProjectFromSourceDir(projectName, taskContent, tempDir); err != nil {
 		c.JSON(500, Fail(err.Error()))
 		return
 	}
-	s.mu.Lock()
-	s.pms[projectName] = pm
-	s.mu.Unlock()
-	s.SaveProjectManagerToFile()
 	c.JSON(200, Success("成功新建项目"))
 }
 
 func (s *Server) startProject(c *gin.Context) {
 	s.mu.RLock()
-	pm, exists := s.pms[c.Param("name")]
+	_, exists := s.pms[c.Param("name")]
 	s.mu.RUnlock()
 	if !exists {
 		c.JSON(404, Fail("project not found"))
 		return
 	}
-	go pm.StartTask()
-	c.JSON(200, Success("项目开始运行"))
+	state, pos := s.enqueueProjectStart(c.Param("name"))
+	c.JSON(200, Success(formatQueueStartMessage(state, pos)))
 }
 func (s *Server) cancelProject(c *gin.Context) {
+	if removed, pos := s.removeProjectFromStartQueue(c.Param("name")); removed {
+		if pos > 0 {
+			c.JSON(200, Success(fmt.Sprintf("项目已从启动队列移除（原排队第%d位）", pos)))
+		} else {
+			c.JSON(200, Success("项目已从启动队列移除"))
+		}
+		return
+	}
 	s.mu.RLock()
 	pm, exists := s.pms[c.Param("name")]
 	s.mu.RUnlock()
@@ -482,6 +496,8 @@ func (s *Server) getEnvInfo(c *gin.Context) {
 }
 
 func (s *Server) delProject(c *gin.Context) {
+	// 如果项目还在启动队列中，先移除，避免后续被调度。
+	_, _ = s.removeProjectFromStartQueue(c.Param("name"))
 	s.mu.RLock()
 	pm, exists := s.pms[c.Param("name")]
 	s.mu.RUnlock()
@@ -558,6 +574,8 @@ func (s *Server) setConfig(c *gin.Context) {
 		return
 	}
 	misc.ReloadDebugFlag()
+	// Re-evaluate queued project scheduling in case concurrency config changed.
+	s.notifyStartQueue()
 	c.JSON(200, Success("配置已保存，部分配置需要重启后生效"))
 }
 

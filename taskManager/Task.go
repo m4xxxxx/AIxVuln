@@ -89,6 +89,12 @@ func (task *Task) GetExploitIdeaQuota() int {
 func (task *Task) GetExploitIdeaSubmitted() int {
 	return task.exploitIdeaSubmitted
 }
+
+// ResetExploitIdeaSubmitted clears per-task submission usage.
+func (task *Task) ResetExploitIdeaSubmitted() {
+	task.exploitIdeaSubmitted = 0
+}
+
 // IncrementExploitIdeaSubmitted increments the counter and returns the new value.
 func (task *Task) IncrementExploitIdeaSubmitted() int {
 	task.exploitIdeaSubmitted++

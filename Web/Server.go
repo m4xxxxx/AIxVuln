@@ -8,11 +8,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"os/signal"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -28,49 +28,115 @@ type Server struct {
 	pms        map[string]*ProjectManager.ProjectManager
 	msgChan    chan string
 	accessHost string
+
+	startQueueMu     sync.Mutex
+	startQueue       []string
+	startQueueSet    map[string]struct{}
+	startRunningSet  map[string]struct{}
+	startQueueNotify chan struct{}
+
+	intelligentTaskMu    sync.RWMutex
+	intelligentTasks     map[string]*intelligentAddTask
+	intelligentTaskOrder []string
+	stateStore           *projectStateStore
 }
 
+const (
+	projectManagerPersistInterval = 20 * time.Second
+	maxPersistProjectEvents       = 1200
+	maxProjectManagerFileBytes    = 64 * 1024 * 1024 // 64MB safeguard
+)
+
 func NewServer() *Server {
-	return &Server{pms: make(map[string]*ProjectManager.ProjectManager), msgChan: make(chan string, 10)}
+	s := &Server{
+		pms:              make(map[string]*ProjectManager.ProjectManager),
+		msgChan:          make(chan string, 10),
+		startQueue:       make([]string, 0),
+		startQueueSet:    make(map[string]struct{}),
+		startRunningSet:  make(map[string]struct{}),
+		startQueueNotify: make(chan struct{}, 1),
+		intelligentTasks: make(map[string]*intelligentAddTask),
+	}
+	if st, err := newProjectStateStore(misc.GetDataDir()); err != nil {
+		misc.Debug("NewServer: init sqlite project state store failed: %v", err)
+	} else {
+		s.stateStore = st
+	}
+	s.initStartQueueDispatcher()
+	return s
 }
 func (s *Server) SaveProjectManagerToFile() {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	var pmsl []taskManager.ProjectInfo
 	for _, pm := range s.pms {
 		pmsl = append(pmsl, taskManager.ProjectInfo{
 			ProjectName:   pm.GetProjectName(),
 			SourceCodeDir: pm.GetSourceCodeDir(),
 			TaskContent:   pm.GetTaskContent(),
+			SandboxID:     pm.GetSandboxContainerID(),
 			StartTime:     pm.GetStartTime(),
 			EndTime:       pm.GetEndTime(),
 			ContainerList: pm.GetContainerList(),
 			VulnList:      pm.GetVulnList(),
-			EventList:     pm.GetEvent(0),
+			ExploitIdeas:  pm.GetExploitIdeaList(),
+			ExploitChains: pm.GetExploitChainList(),
+			TokenUsage:    pm.GetTokenUsageSnapshot(),
+			EventList:     pm.GetEvent(maxPersistProjectEvents),
 			EnvInfo:       pm.GetEnvInfo(),
 			ProjectDir:    pm.GetProjectDir(),
 			ReportList:    pm.GetReportList(),
 		})
 	}
-	ps, err := json.Marshal(pmsl)
-	if err != nil {
-		return
+	s.mu.RUnlock()
+	if s.stateStore != nil {
+		if err := s.stateStore.SaveAll(pmsl); err == nil {
+			return
+		} else {
+			misc.Debug("SaveProjectManagerToFile: sqlite save failed, fallback to json: %v", err)
+		}
 	}
-	_ = os.WriteFile(misc.GetDataDir()+"/projectManager.json", ps, 0644)
+	s.saveProjectInfosToLegacyJSON(pmsl)
 }
 func (s *Server) LoadProjectManagerFromFile() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ps, err := ioutil.ReadFile(misc.GetDataDir() + "/projectManager.json")
+
 	var pmsl []taskManager.ProjectInfo
-	if err != nil {
+	if s.stateStore != nil {
+		if loaded, err := s.stateStore.LoadAll(); err != nil {
+			misc.Debug("LoadProjectManagerFromFile: sqlite load failed: %v", err)
+		} else if len(loaded) > 0 {
+			pmsl = loaded
+			misc.Debug("LoadProjectManagerFromFile: restored %d projects from sqlite", len(pmsl))
+		}
+	}
+
+	legacyPath := filepath.Join(misc.GetDataDir(), "projectManager.json")
+	if len(pmsl) == 0 {
+		legacyLoaded, err := s.loadProjectInfosFromLegacyJSON(legacyPath)
+		if err == nil && len(legacyLoaded) > 0 {
+			pmsl = legacyLoaded
+			misc.Debug("LoadProjectManagerFromFile: restored %d projects from legacy json", len(pmsl))
+			if s.stateStore != nil {
+				if err := s.stateStore.SaveAll(pmsl); err != nil {
+					misc.Debug("LoadProjectManagerFromFile: migrate legacy json to sqlite failed: %v", err)
+				} else {
+					backup := fmt.Sprintf("%s.migrated.%s.bak", legacyPath, time.Now().Format("20060102_150405"))
+					_ = os.Rename(legacyPath, backup)
+					misc.Debug("LoadProjectManagerFromFile: migrated legacy json to sqlite, backup=%s", backup)
+				}
+			}
+		}
+	}
+
+	if len(pmsl) == 0 {
 		return
 	}
-	err = json.Unmarshal(ps, &pmsl)
-	if err != nil {
-		return
-	}
+
 	for _, p := range pmsl {
+		if len(p.EventList) > maxPersistProjectEvents {
+			p.EventList = append([]string(nil), p.EventList[len(p.EventList)-maxPersistProjectEvents:]...)
+		}
 		projectConfig := ProjectManager.ProjectConfig{ProjectName: p.ProjectName, SourceCodeDir: p.SourceCodeDir, MsgChan: s.msgChan, TaskContent: p.TaskContent}
 		pm, err := ProjectManager.NewProjectManager(projectConfig)
 		if err != nil {
@@ -85,8 +151,41 @@ func (s *Server) LoadProjectManagerFromFile() {
 		pm.SetStartTime(p.StartTime)
 		pm.SetEndTime(p.EndTime)
 		pm.SetReport(p.ReportList)
+		pm.SetSandboxContainerID(p.SandboxID)
+		pm.RestoreExploitState(p.ExploitIdeas, p.ExploitChains)
+		pm.RestoreTokenUsageSnapshot(p.TokenUsage)
 		s.pms[p.ProjectName] = pm
 	}
+}
+
+func (s *Server) saveProjectInfosToLegacyJSON(pmsl []taskManager.ProjectInfo) {
+	ps, err := json.Marshal(pmsl)
+	if err != nil {
+		return
+	}
+	target := filepath.Join(misc.GetDataDir(), "projectManager.json")
+	tmp := target + ".tmp"
+	if err := os.WriteFile(tmp, ps, 0644); err != nil {
+		return
+	}
+	_ = os.Rename(tmp, target)
+}
+
+func (s *Server) loadProjectInfosFromLegacyJSON(pmPath string) ([]taskManager.ProjectInfo, error) {
+	if st, err := os.Stat(pmPath); err == nil && st.Size() > maxProjectManagerFileBytes {
+		backup := fmt.Sprintf("%s.too_large.%s.bak", pmPath, time.Now().Format("20060102_150405"))
+		_ = os.Rename(pmPath, backup)
+		return nil, fmt.Errorf("legacy snapshot too large (%d bytes), moved to %s", st.Size(), backup)
+	}
+	ps, err := os.ReadFile(pmPath)
+	if err != nil {
+		return nil, err
+	}
+	var pmsl []taskManager.ProjectInfo
+	if err := json.Unmarshal(ps, &pmsl); err != nil {
+		return nil, err
+	}
+	return pmsl, nil
 }
 
 func (s *Server) StartWebServer(port string) {
@@ -198,6 +297,9 @@ func (s *Server) Handler(uiFS fs.FS) http.Handler {
 	authorized.GET("/projects", s.getPms)
 	authorized.GET("/projects/:name", s.getProject)
 	authorized.POST("/projects/create", s.createProject)
+	authorized.POST("/projects/intelligent_add_open_source_audit/start", s.startIntelligentAddOpenSourceAuditTask)
+	authorized.GET("/projects/intelligent_add_open_source_audit/tasks/:id", s.getIntelligentAddOpenSourceAuditTask)
+	authorized.POST("/projects/intelligent_add_open_source_audit", s.intelligentAddOpenSourceAudit)
 	authorized.GET("/projects/:name/del", s.delProject)
 	authorized.GET("/projects/:name/start", s.startProject)
 	authorized.GET("/projects/:name/cancel", s.cancelProject)
@@ -238,7 +340,7 @@ func (s *Server) Handler(uiFS fs.FS) http.Handler {
 
 	// 运行时定时持久化，避免异常退出导致状态丢失
 	go func() {
-		ticker := time.NewTicker(5 * time.Second)
+		ticker := time.NewTicker(projectManagerPersistInterval)
 		defer ticker.Stop()
 		for range ticker.C {
 			s.SaveProjectManagerToFile()
@@ -264,6 +366,11 @@ func (s *Server) startWebServer(port string, uiFS fs.FS) {
 
 	// 退出前持久化一次并优雅关闭
 	s.SaveProjectManagerToFile()
+	if s.stateStore != nil {
+		if err := s.stateStore.Close(); err != nil {
+			misc.Debug("startWebServer: close sqlite project state store failed: %v", err)
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = httpServer.Shutdown(ctx)

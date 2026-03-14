@@ -33,7 +33,9 @@ var allDefaults = []configDefault{
 	// [misc]
 	{Section: "misc", Key: "MessageMaximum", Value: "10240"},
 	{Section: "misc", Key: "MaxTryCount", Value: "5"},
+	{Section: "misc", Key: "PROJECT_TASK_MAX_CONCURRENCY", Value: "2"},
 	{Section: "misc", Key: "DATA_DIR", Value: "./data"},
+	{Section: "misc", Key: "GITHUB_COPILOT_MCP_AUTHORIZATION", Value: ""},
 	{Section: "misc", Key: "FeiShuAPI", Value: ""},
 	{Section: "misc", Key: "DEBUG", Value: "false"},
 

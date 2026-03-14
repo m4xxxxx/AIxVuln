@@ -2,7 +2,6 @@ package dockerManager
 
 import (
 	"AIxVuln/llm"
-	"log"
 )
 
 type Sandbox struct {
@@ -13,14 +12,33 @@ type Sandbox struct {
 	sandboxEnvMsg llm.EnvMessageX
 }
 
-func NewSandbox(dm *DockerManager, sourceCodeDir string) *Sandbox {
+func buildSandboxEnvMsg(containerID, containerIP string) llm.EnvMessageX {
+	return llm.EnvMessageX{
+		Key:       "AttackSandBoxInfo",
+		Content:   map[string]interface{}{"ContainerId": containerID, "ContainerIP": containerIP},
+		AppendEnv: false,
+	}
+}
+
+func NewSandboxFromExisting(dm *DockerManager, containerID, containerIP, sourceCodeDir string) *Sandbox {
+	s := &Sandbox{
+		ContainerId:   containerID,
+		ContainerIp:   containerIP,
+		dm:            dm,
+		SourceCodeDir: sourceCodeDir,
+	}
+	s.sandboxEnvMsg = buildSandboxEnvMsg(containerID, containerIP)
+	return s
+}
+
+func NewSandbox(dm *DockerManager, sourceCodeDir string) (*Sandbox, error) {
 	r, err := dm.Run("aisandbox", nil, 10, SetVolume(sourceCodeDir, "/sourceCodeDir"), SetWorkingDir("/sourceCodeDir"))
 	if err != nil {
-		log.Fatalf("Error running aisandbox: %s", err)
+		return nil, err
 	}
 	s := &Sandbox{ContainerId: r.ContainerID, ContainerIp: r.IPAddress, dm: dm, SourceCodeDir: sourceCodeDir}
-	s.sandboxEnvMsg = llm.EnvMessageX{Key: "AttackSandBoxInfo", Content: map[string]interface{}{"ContainerId": s.ContainerId, "ContainerIP": s.ContainerIp}, AppendEnv: false}
-	return s
+	s.sandboxEnvMsg = buildSandboxEnvMsg(s.ContainerId, s.ContainerIp)
+	return s, nil
 }
 
 func (s *Sandbox) GetSandboxEnvMsg() *llm.EnvMessageX {

@@ -1,8 +1,8 @@
 package dockerManager
 
 import (
+	"AIxVuln/misc"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,7 +18,7 @@ func NewServiceManager(sourceCodePath string, dm *DockerManager) *ServiceManager
 	if !strings.HasPrefix(sourceCodePath, "/") {
 		absSourceCodePath, err := filepath.Abs(sourceCodePath)
 		if err != nil {
-			log.Fatal(err)
+			misc.PanicWithStack("计算源码目录绝对路径失败: %v", err)
 		}
 		sourceCodePath = absSourceCodePath
 	}

@@ -5,7 +5,6 @@ import (
 	"AIxVuln/misc"
 	"embed"
 	"io/fs"
-	"log"
 )
 
 //go:embed all:dockerfile
@@ -14,12 +13,12 @@ var dockerfileFS embed.FS
 func init() {
 	sub, err := fs.Sub(dockerfileFS, "dockerfile")
 	if err != nil {
-		log.Fatal("embed dockerfile: ", err)
+		misc.PanicWithStack("embed dockerfile 失败: %v", err)
 	}
 	misc.SetDockerfileFS(sub)
 	err = misc.CreateDirIfNotExists("data/temp/")
 	if err != nil {
-		log.Fatal(err)
+		misc.PanicWithStack("创建 data/temp 失败: %v", err)
 	}
 }
 

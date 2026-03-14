@@ -22,6 +22,71 @@ function getRespData<T>(r: ApiResp<T>): T | undefined {
     return (r.result ?? r.Data ?? r.data) as any;
 }
 
+type IntelligentRepo = {
+    full_name?: string;
+    clone_url?: string;
+    html_url?: string;
+    description?: string;
+    language?: string;
+    stars?: number;
+    reason?: string;
+};
+
+type IntelligentCreatedProject = {
+    project_name?: string;
+    repository?: IntelligentRepo;
+};
+
+type ScoutTraceItem = {
+    time?: string;
+    stage?: string;
+    detail?: string;
+};
+
+type ScoutDiagnostics = {
+    mcp_tool_count?: number;
+    mcp_tool_names?: string[];
+    rounds?: number;
+    tool_call_count?: number;
+    last_error?: string;
+    trace?: ScoutTraceItem[];
+};
+
+type IntelligentAddTaskSnapshot = {
+    task_id?: string;
+    status?: string;
+    progress?: number;
+    message?: string;
+    logs?: ScoutTraceItem[];
+    next_from?: number;
+    total_logs?: number;
+    error?: string;
+    result?: IntelligentAddResult;
+};
+
+type IntelligentAddResult = {
+    query?: string;
+    selected_repositories?: IntelligentRepo[];
+    created_projects?: IntelligentCreatedProject[];
+    started_projects?: string[];
+    failed_items?: { full_name?: string; clone_url?: string; project_name?: string; error?: string }[];
+    auto_start?: boolean;
+    scout_summary?: string;
+    scout_diagnostics?: ScoutDiagnostics;
+};
+
+type ProjectListItem = {
+    projectName: string;
+    status?: string;
+    rawStatus?: string;
+    isRunning?: boolean;
+    isQueued?: boolean;
+    queuePosition?: number;
+    brainFinished?: boolean;
+    startTime?: string;
+    endTime?: string;
+};
+
 function App() {
     const [baseURL, setBaseURL] = useState<string>('');
     const [auth, setAuth] = useState<{ user: string; pass: string } | null>(null);
@@ -32,7 +97,7 @@ function App() {
     const [loginPass, setLoginPass] = useState<string>('');
     const [loginError, setLoginError] = useState<string>('');
     const [loginLoading, setLoginLoading] = useState<boolean>(false);
-    const [projects, setProjects] = useState<string[]>([]);
+    const [projects, setProjects] = useState<ProjectListItem[]>([]);
     const [events, setEvents] = useState<any[]>([]);
     const [agentRuns, setAgentRuns] = useState<any[]>([]);
     const [digitalHumanRoster, setDigitalHumanRoster] = useState<Record<string, any[]>>({});
@@ -55,6 +120,22 @@ function App() {
     const [sourceType, setSourceType] = useState<'file' | 'git' | 'url'>('file');
     const [gitUrl, setGitUrl] = useState<string>('');
     const [fileUrl, setFileUrl] = useState<string>('');
+    const [smartQuery, setSmartQuery] = useState<string>('');
+    const [smartMaxProjects, setSmartMaxProjects] = useState<number>(3);
+    const [smartLanguage, setSmartLanguage] = useState<string>('');
+    const [smartStarsMin, setSmartStarsMin] = useState<string>('');
+    const [smartStarsMax, setSmartStarsMax] = useState<string>('');
+    const [smartUpdatedWithinDays, setSmartUpdatedWithinDays] = useState<string>('');
+    const [smartGitHubMCPMaxRounds, setSmartGitHubMCPMaxRounds] = useState<string>('0');
+    const [smartAutoStart, setSmartAutoStart] = useState<boolean>(false);
+    const [smartTaskContent, setSmartTaskContent] = useState<string>(taskContent);
+    const [smartAddResult, setSmartAddResult] = useState<IntelligentAddResult | null>(null);
+    const [smartTaskId, setSmartTaskId] = useState<string>('');
+    const [smartTaskStatus, setSmartTaskStatus] = useState<string>('');
+    const [smartTaskProgress, setSmartTaskProgress] = useState<number>(0);
+    const [smartTaskMessage, setSmartTaskMessage] = useState<string>('');
+    const [smartTaskLogs, setSmartTaskLogs] = useState<ScoutTraceItem[]>([]);
+    const smartTaskStopRef = useRef<boolean>(false);
     const fileRef = useRef<HTMLInputElement | null>(null);
     const wsRef = useRef<WebSocket | null>(null);
     const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'system'; text: string; ts: string; persona_name?: string; avatar_file?: string }[]>([]);
@@ -165,6 +246,12 @@ function App() {
     useEffect(() => {
         detailLiveRef.current = { open: detailOpen, kind: detailKind, obj: detailObj };
     }, [detailOpen, detailKind, detailObj]);
+
+    useEffect(() => {
+        return () => {
+            smartTaskStopRef.current = true;
+        };
+    }, []);
 
     function cleanupDetailState() {
         wsRef.current?.close();
@@ -347,6 +434,33 @@ function App() {
         return s.length > max;
     }
 
+    function normalizeProjectList(data: any): ProjectListItem[] {
+        if (!Array.isArray(data)) return [];
+        const out: ProjectListItem[] = [];
+        for (const item of data) {
+            if (typeof item === 'string') {
+                const name = item.trim();
+                if (name) out.push({ projectName: name });
+                continue;
+            }
+            if (!item || typeof item !== 'object') continue;
+            const name = String(item.projectName ?? item.project_name ?? item.name ?? '').trim();
+            if (!name) continue;
+            out.push({
+                projectName: name,
+                status: String(item.status ?? ''),
+                rawStatus: String(item.rawStatus ?? item.raw_status ?? ''),
+                isRunning: !!item.isRunning,
+                isQueued: !!item.isQueued,
+                queuePosition: Number(item.queuePosition ?? 0) || 0,
+                brainFinished: !!item.brainFinished,
+                startTime: String(item.startTime ?? ''),
+                endTime: String(item.endTime ?? ''),
+            });
+        }
+        return out;
+    }
+
     async function apiPost<T>(path: string, body: any): Promise<T | undefined> {
         let useBase = baseURL;
         if (!useBase) {
@@ -416,9 +530,7 @@ function App() {
         if (!authHeader) return;
 
         const data = await apiGet<any>('/projects');
-        if (Array.isArray(data)) {
-            setProjects(data);
-        }
+        setProjects(normalizeProjectList(data));
     }
 
     useEffect(() => {
@@ -464,6 +576,124 @@ function App() {
         }
     }
 
+    async function intelligentAddOpenSourceAudit() {
+        if (!authHeader) return;
+        if (!smartQuery.trim()) {
+            showToast('请输入 GitHub 检索条件', 'err');
+            return;
+        }
+        const maxProjects = Number.isFinite(smartMaxProjects) ? Math.max(1, Math.min(10, Number(smartMaxProjects) || 3)) : 3;
+        const starsMin = parseInt(smartStarsMin.trim(), 10);
+        const starsMax = parseInt(smartStarsMax.trim(), 10);
+        const updatedDays = parseInt(smartUpdatedWithinDays.trim(), 10);
+        const githubMCPMaxRounds = parseInt(smartGitHubMCPMaxRounds.trim(), 10);
+        const task = smartTaskContent.trim() || taskContent.trim();
+        if (!Number.isNaN(starsMin) && !Number.isNaN(starsMax) && starsMin > 0 && starsMax > 0 && starsMin > starsMax) {
+            showToast('最低 Star 不能大于最高 Star', 'err');
+            return;
+        }
+        if (!Number.isNaN(githubMCPMaxRounds) && githubMCPMaxRounds < 0) {
+            showToast('GitHub MCP 最大轮次不能小于 0', 'err');
+            return;
+        }
+
+        setBtnLoading(prev => ({ ...prev, intelligentAdd: true }));
+        smartTaskStopRef.current = false;
+        setSmartAddResult(null);
+        setSmartTaskLogs([]);
+        setSmartTaskId('');
+        setSmartTaskStatus('queued');
+        setSmartTaskProgress(0);
+        setSmartTaskMessage('任务提交中…');
+        try {
+            const body: any = {
+                query: smartQuery.trim(),
+                max_projects: maxProjects,
+                auto_start: smartAutoStart,
+                audit_task_content: task,
+            };
+            if (smartLanguage.trim()) body.language = smartLanguage.trim();
+            if (!Number.isNaN(starsMin) && starsMin > 0) body.stars_min = starsMin;
+            if (!Number.isNaN(starsMax) && starsMax > 0) body.stars_max = starsMax;
+            if (!Number.isNaN(updatedDays) && updatedDays > 0) body.updated_within_days = updatedDays;
+            if (!Number.isNaN(githubMCPMaxRounds) && githubMCPMaxRounds >= 0) body.github_mcp_max_rounds = githubMCPMaxRounds;
+
+            const resp = await fetch(`${baseURL}/projects/intelligent_add_open_source_audit/start`, {
+                method: 'POST',
+                headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            const js = await resp.json();
+            if (!resp.ok || js?.error) {
+                const msg = typeof js?.error === 'string' ? js.error : (js?.error?.message || '智能添加失败');
+                setSmartTaskStatus('failed');
+                setSmartTaskMessage(msg);
+                showToast(msg, 'err');
+                return;
+            }
+            const startResult = getRespData<any>(js) ?? {};
+            const taskId = String(startResult?.task_id ?? '');
+            if (!taskId) {
+                setSmartTaskStatus('failed');
+                setSmartTaskMessage('未返回任务ID');
+                showToast('未返回任务ID', 'err');
+                return;
+            }
+            setSmartTaskId(taskId);
+            setSmartTaskStatus(String(startResult?.status ?? 'queued'));
+            setSmartTaskMessage(String(startResult?.message ?? '任务已创建'));
+            setSmartTaskProgress(0);
+            setSmartTaskLogs(prev => [...prev, { time: '', stage: 'queued', detail: `任务已创建: ${taskId}` }]);
+
+            let from = 0;
+            while (!smartTaskStopRef.current) {
+                const snap = await apiGet<IntelligentAddTaskSnapshot>(`/projects/intelligent_add_open_source_audit/tasks/${encodeURIComponent(taskId)}?from=${from}`);
+                if (!snap) {
+                    throw new Error('任务状态为空');
+                }
+                const status = String(snap.status || 'running');
+                const progress = Number(snap.progress ?? 0);
+                const msg = String(snap.message || '');
+                const logs = Array.isArray(snap.logs) ? snap.logs : [];
+                from = Number(snap.next_from ?? from + logs.length);
+
+                setSmartTaskStatus(status);
+                setSmartTaskProgress(progress);
+                setSmartTaskMessage(msg);
+                if (logs.length > 0) {
+                    setSmartTaskLogs(prev => [...prev, ...logs].slice(-500));
+                }
+                if (snap.result) {
+                    setSmartAddResult(snap.result);
+                }
+
+                if (status === 'success') {
+                    const result = snap.result ?? null;
+                    await refreshProjects();
+                    const createdCount = Array.isArray(result?.created_projects) ? result?.created_projects.length : 0;
+                    const startedCount = Array.isArray(result?.started_projects) ? result?.started_projects.length : 0;
+                    if (smartAutoStart) {
+                        showToast(`智能添加完成，创建 ${createdCount} 个项目，自动启动 ${startedCount} 个项目`);
+                    } else {
+                        showToast(`智能添加完成，创建 ${createdCount} 个项目`);
+                    }
+                    break;
+                }
+                if (status === 'failed') {
+                    showToast(String(snap.error || msg || '智能添加失败'), 'err');
+                    break;
+                }
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        } catch (e: any) {
+            setSmartTaskStatus('failed');
+            setSmartTaskMessage(e?.message || '智能添加失败');
+            showToast(e?.message || '智能添加失败', 'err');
+        } finally {
+            setBtnLoading(prev => ({ ...prev, intelligentAdd: false }));
+        }
+    }
+
     async function enterProject(name: string) {
         window.location.hash = `#/project/${encodeURIComponent(name)}`;
     }
@@ -472,14 +702,35 @@ function App() {
         window.location.hash = '#/';
     }
 
+    function sanitizeConfigForUI(input: Record<string, Record<string, string>>): Record<string, Record<string, string>> {
+        const hiddenKeys = new Set([
+            'MCP_SERVERS',
+            'GITHUB_COPILOT_MCP_ENABLED',
+            'GITHUB_COPILOT_MCP_URL',
+            'GITHUB_COPILOT_MCP_HEADERS',
+            'GITHUB_COPILOT_MCP_TOOL_PREFIX',
+        ]);
+        const out: Record<string, Record<string, string>> = {};
+        Object.entries(input || {}).forEach(([section, kv]) => {
+            const sec: Record<string, string> = {};
+            Object.entries(kv || {}).forEach(([key, value]) => {
+                if (hiddenKeys.has(key)) return;
+                sec[key] = value;
+            });
+            out[section] = sec;
+        });
+        return out;
+    }
+
     async function fetchConfig() {
         setConfigLoading(true);
         try {
             const resp = await fetch(`${baseURL}/config`, { headers: { Authorization: authHeader } });
             const js = await resp.json();
             const d = getRespData<Record<string, Record<string, string>>>(js) ?? {};
-            setConfigData(JSON.parse(JSON.stringify(d)));
-            setConfigDraft(JSON.parse(JSON.stringify(d)));
+            const sanitized = sanitizeConfigForUI(d);
+            setConfigData(JSON.parse(JSON.stringify(sanitized)));
+            setConfigDraft(JSON.parse(JSON.stringify(sanitized)));
         } catch (e: any) {
             showToast('加载配置失败: ' + (e?.message || ''), 'err');
         } finally {
@@ -490,10 +741,11 @@ function App() {
     async function saveConfig() {
         setConfigSaving(true);
         try {
+            const sanitized = sanitizeConfigForUI(configDraft);
             const resp = await fetch(`${baseURL}/config`, {
                 method: 'PUT',
                 headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-                body: JSON.stringify(configDraft),
+                body: JSON.stringify(sanitized),
             });
             const js = await resp.json();
             if (!resp.ok || js?.error) {
@@ -501,7 +753,8 @@ function App() {
                 return;
             }
             showToast(getRespData<string>(js) || '保存成功');
-            setConfigData(JSON.parse(JSON.stringify(configDraft)));
+            setConfigData(JSON.parse(JSON.stringify(sanitized)));
+            setConfigDraft(JSON.parse(JSON.stringify(sanitized)));
         } catch (e: any) {
             showToast('保存失败: ' + (e?.message || ''), 'err');
         } finally {
@@ -1025,8 +1278,9 @@ function App() {
         const key = `start_${name}`;
         setBtnLoading(prev => ({ ...prev, [key]: true }));
         try {
-            await apiGet(`/projects/${encodeURIComponent(name)}/start`);
-            showToast(`${name} 已启动`);
+            const msg = await apiGet<string>(`/projects/${encodeURIComponent(name)}/start`);
+            showToast(msg || `${name} 已加入启动队列`);
+            await refreshProjects();
         } catch (e: any) {
             showToast(e?.message || '启动失败', 'err');
         } finally {
@@ -1037,8 +1291,9 @@ function App() {
         const key = `stop_${name}`;
         setBtnLoading(prev => ({ ...prev, [key]: true }));
         try {
-            await apiGet(`/projects/${encodeURIComponent(name)}/cancel`);
-            showToast(`${name} 已停止`);
+            const msg = await apiGet<string>(`/projects/${encodeURIComponent(name)}/cancel`);
+            showToast(msg || `${name} 已停止`);
+            await refreshProjects();
         } catch (e: any) {
             showToast(e?.message || '停止失败', 'err');
         } finally {
@@ -1687,6 +1942,7 @@ function App() {
                         misc: '全局通用配置（消息长度限制、重试次数、数据目录等）',
                         decision: '决策大脑专用配置（可覆盖 main_setting 中的 LLM 和并发配置）',
                         main_setting: '全局默认 LLM 配置（各 Agent section 未配置时的 fallback）',
+                        general: '通用杂项 Agent 专用配置（可覆盖 main_setting）',
                         ops: '运维 Agent 专用配置（可覆盖 main_setting）',
                         analyze: '代码审计 Agent 专用配置（可覆盖 main_setting）',
                         verifier: '漏洞验证 Agent 专用配置（可覆盖 main_setting）',
@@ -1697,7 +1953,9 @@ function App() {
                         MaxContext: '最大Context大小（KB），超过将触发压缩机制',
                         MessageMaximum: '单条消息最大长度（字符），超过将截断',
                         MaxTryCount: 'API请求错误的最大重试次数',
+                        PROJECT_TASK_MAX_CONCURRENCY: '项目任务最大并发数（点击“启动”后先进入队列，按该并发数执行）',
                         DATA_DIR: '数据存储目录',
+                        GITHUB_COPILOT_MCP_AUTHORIZATION: 'GitHub Copilot MCP 的 Authorization 请求头值',
                         MaxRequest: '单个API-KEY的最大并发请求数',
                         FeiShuAPI: '飞书机器人 Webhook API 地址',
                         USER_AGENT: 'HTTP请求的 User-Agent 头',
@@ -1708,9 +1966,10 @@ function App() {
                         MODEL: '模型名称',
                     };
                     const sectionKeys: Record<string, string[]> = {
-                        misc: ['MessageMaximum', 'MaxTryCount', 'DATA_DIR', 'FeiShuAPI'],
+                        misc: ['MessageMaximum', 'MaxTryCount', 'PROJECT_TASK_MAX_CONCURRENCY', 'DATA_DIR', 'GITHUB_COPILOT_MCP_AUTHORIZATION', 'FeiShuAPI'],
                         main_setting: ['BASE_URL', 'OPENAI_API_KEY', 'MODEL', 'MaxContext', 'MaxRequest', 'USER_AGENT', 'STREAM', 'API_MODE'],
                         decision: ['BASE_URL', 'OPENAI_API_KEY', 'MODEL', 'MaxContext', 'MaxRequest', 'USER_AGENT', 'STREAM', 'API_MODE'],
+                        general: ['BASE_URL', 'OPENAI_API_KEY', 'MODEL', 'MaxContext', 'MaxRequest', 'USER_AGENT', 'STREAM', 'API_MODE'],
                         ops: ['BASE_URL', 'OPENAI_API_KEY', 'MODEL', 'MaxContext', 'MaxRequest', 'USER_AGENT', 'STREAM', 'API_MODE'],
                         analyze: ['BASE_URL', 'OPENAI_API_KEY', 'MODEL', 'MaxContext', 'MaxRequest', 'USER_AGENT', 'STREAM', 'API_MODE'],
                         verifier: ['BASE_URL', 'OPENAI_API_KEY', 'MODEL', 'MaxContext', 'MaxRequest', 'USER_AGENT', 'STREAM', 'API_MODE'],
@@ -1871,6 +2130,7 @@ function App() {
                 })()
                 : view === 'digital_humans' ? (() => {
                     const agentTypeLabels: Record<string, string> = {
+                        'Agent-General-GeneralCommonAgent': '通用杂项 (General)',
                         'Agent-Ops-OpsCommonAgent': '环境运维 (Ops)',
                         'Agent-Ops-OpsEnvScoutAgent': '环境侦察 (EnvScout)',
                         'Agent-Analyze-AnalyzeCommonAgent': '代码审计 (Analyze)',
@@ -2091,17 +2351,22 @@ function App() {
                             <div className="p-2 space-y-2">
                                 {projects.map((p) => (
                                     <div
-                                        key={p}
+                                        key={p.projectName}
                                         className="aix-project-item flex items-center justify-between gap-2 rounded-lg border border-border bg-background/10 px-3 py-2 hover:bg-muted/30"
                                     >
-                                        <button className="flex-1 text-left min-w-0" onClick={() => enterProject(p)}>
-                                            <div className="font-semibold truncate">{p}</div>
+                                        <button className="flex-1 text-left min-w-0" onClick={() => enterProject(p.projectName)}>
+                                            <div className="font-semibold truncate">{p.projectName}</div>
+                                            <div className="mt-1 flex items-center gap-2">
+                                                <Badge variant={p.isRunning ? 'warning' : p.isQueued ? 'secondary' : p.brainFinished ? 'default' : 'secondary'}>
+                                                    {p.status || p.rawStatus || (p.isRunning ? '正在运行' : '未运行')}
+                                                </Badge>
+                                            </div>
                                         </button>
                                         <div className="aix-project-btns flex shrink-0 flex-wrap gap-2">
-                                            <Button size="sm" variant="secondary" disabled={!!btnLoading[`start_${p}`]} onClick={() => startProject(p)}>{btnLoading[`start_${p}`] ? '启动中…' : '启动'}</Button>
-                                            <Button size="sm" variant="outline" disabled={!!btnLoading[`stop_${p}`]} onClick={() => stopProject(p)}>{btnLoading[`stop_${p}`] ? '停止中…' : '停止'}</Button>
-                                            <Button size="sm" variant="default" onClick={() => enterProject(p)}>进入</Button>
-                                            <Button size="sm" variant="destructive" disabled={!!btnLoading[`del_${p}`]} onClick={() => deleteProject(p)}>{btnLoading[`del_${p}`] ? '删除中…' : '删除'}</Button>
+                                            <Button size="sm" variant="secondary" disabled={!!btnLoading[`start_${p.projectName}`]} onClick={() => startProject(p.projectName)}>{btnLoading[`start_${p.projectName}`] ? '启动中…' : '启动'}</Button>
+                                            <Button size="sm" variant="outline" disabled={!!btnLoading[`stop_${p.projectName}`]} onClick={() => stopProject(p.projectName)}>{btnLoading[`stop_${p.projectName}`] ? '停止中…' : '停止'}</Button>
+                                            <Button size="sm" variant="default" onClick={() => enterProject(p.projectName)}>进入</Button>
+                                            <Button size="sm" variant="destructive" disabled={!!btnLoading[`del_${p.projectName}`]} onClick={() => deleteProject(p.projectName)}>{btnLoading[`del_${p.projectName}`] ? '删除中…' : '删除'}</Button>
                                         </div>
                                     </div>
                                 ))}
@@ -2173,6 +2438,226 @@ function App() {
                         <div style={{ display: 'none' }}>{initError}{baseURL}{events.length}</div>
                     </CardContent>
                 </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>智能添加开源项目审计任务</CardTitle>
+                        <Badge variant="secondary">GitHub + 通用 Agent</Badge>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="space-y-3">
+                            <Input
+                                placeholder="检索条件（例如：Go 微服务 鉴权 JWT）"
+                                value={smartQuery}
+                                onChange={(e) => setSmartQuery(e.target.value)}
+                            />
+                            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                                <div>
+                                    <label className="text-xs text-muted-foreground mb-1 block">最多创建项目数</label>
+                                    <Input
+                                        type="number"
+                                        min={1}
+                                        max={10}
+                                        value={smartMaxProjects}
+                                        onChange={(e) => setSmartMaxProjects(Math.max(1, Math.min(10, parseInt(e.target.value || '3', 10) || 3)))}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-muted-foreground mb-1 block">语言（可选）</label>
+                                    <Input
+                                        placeholder="例如：Go / Java / Python"
+                                        value={smartLanguage}
+                                        onChange={(e) => setSmartLanguage(e.target.value)}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-muted-foreground mb-1 block">最低 Star（可选）</label>
+                                    <Input
+                                        type="number"
+                                        min={0}
+                                        placeholder="例如：1000"
+                                        value={smartStarsMin}
+                                        onChange={(e) => setSmartStarsMin(e.target.value)}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-muted-foreground mb-1 block">最高 Star（可选）</label>
+                                    <Input
+                                        type="number"
+                                        min={0}
+                                        placeholder="例如：50000"
+                                        value={smartStarsMax}
+                                        onChange={(e) => setSmartStarsMax(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <div>
+                                    <label className="text-xs text-muted-foreground mb-1 block">最近更新天数（可选）</label>
+                                    <Input
+                                        type="number"
+                                        min={1}
+                                        placeholder="例如：180"
+                                        value={smartUpdatedWithinDays}
+                                        onChange={(e) => setSmartUpdatedWithinDays(e.target.value)}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-muted-foreground mb-1 block">GitHub MCP 最大轮次（0=不限）</label>
+                                    <Input
+                                        type="number"
+                                        min={0}
+                                        placeholder="默认 0（不限）"
+                                        value={smartGitHubMCPMaxRounds}
+                                        onChange={(e) => setSmartGitHubMCPMaxRounds(e.target.value)}
+                                    />
+                                </div>
+                                <div className="flex items-end">
+                                    <label className="inline-flex items-center gap-2 text-sm text-muted-foreground select-none">
+                                        <input
+                                            type="checkbox"
+                                            checked={smartAutoStart}
+                                            onChange={(e) => setSmartAutoStart(e.target.checked)}
+                                        />
+                                        创建后自动启动审计
+                                    </label>
+                                </div>
+                            </div>
+                            <Textarea
+                                placeholder="审计任务内容（可选，不填则使用默认任务）"
+                                value={smartTaskContent}
+                                onChange={(e) => setSmartTaskContent(e.target.value)}
+                            />
+                            <div className="flex gap-2">
+                                <Button disabled={!!btnLoading.intelligentAdd} onClick={intelligentAddOpenSourceAudit}>
+                                    {btnLoading.intelligentAdd ? '智能添加中…' : '智能添加'}
+                                </Button>
+                            </div>
+                        </div>
+
+                        {(smartTaskId || smartTaskStatus || smartTaskLogs.length > 0) && (
+                            <div className="mt-4 space-y-2 rounded-lg border border-border bg-background/20 p-3">
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="text-sm font-semibold">实时进度</div>
+                                    <Badge variant={smartTaskStatus === 'success' ? 'success' : smartTaskStatus === 'failed' ? 'destructive' : 'warning'}>
+                                        {smartTaskStatus || 'running'}
+                                    </Badge>
+                                </div>
+                                {smartTaskId ? (
+                                    <div className="text-xs text-muted-foreground break-all">任务ID: {smartTaskId}</div>
+                                ) : null}
+                                <div className="text-xs text-muted-foreground">{smartTaskMessage || '等待任务状态…'}</div>
+                                <div style={{ height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                                    <div style={{ height: '100%', width: `${Math.max(0, Math.min(100, smartTaskProgress))}%`, background: smartTaskStatus === 'failed' ? '#ef4444' : '#22c55e', transition: 'width 0.4s ease' }} />
+                                </div>
+                                <div className="text-[11px] text-muted-foreground">进度: {Math.max(0, Math.min(100, smartTaskProgress))}%</div>
+                                <div className="max-h-[180px] overflow-auto rounded border border-border/40 p-1.5 space-y-1">
+                                    {smartTaskLogs.length === 0 ? (
+                                        <div className="text-[11px] text-muted-foreground">暂无日志</div>
+                                    ) : (
+                                        smartTaskLogs.map((t, idx) => (
+                                            <div key={`${t.time || ''}_${idx}`} className="text-[11px] leading-4 break-words">
+                                                <span className="text-muted-foreground">[{t.time || '--:--:--'}]</span>
+                                                {' '}<span className="font-medium">{t.stage || '-'}</span>
+                                                {' '}<span>{t.detail || ''}</span>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {smartAddResult && (
+                            <div className="mt-4 space-y-3 rounded-lg border border-border bg-background/20 p-3">
+                                <div className="text-sm font-semibold">执行结果</div>
+                                {smartAddResult.scout_summary ? (
+                                    <div className="text-xs text-muted-foreground">{smartAddResult.scout_summary}</div>
+                                ) : null}
+                                {smartAddResult.scout_diagnostics ? (
+                                    <div className="rounded border border-border/60 px-2 py-2 space-y-1">
+                                        <div className="text-xs font-medium">检索诊断</div>
+                                        <div className="text-xs text-muted-foreground">
+                                            MCP工具数: {Number(smartAddResult.scout_diagnostics.mcp_tool_count || 0)}
+                                            {' '}| 轮次: {Number(smartAddResult.scout_diagnostics.rounds || 0)}
+                                            {' '}| 工具调用: {Number(smartAddResult.scout_diagnostics.tool_call_count || 0)}
+                                        </div>
+                                        {(smartAddResult.scout_diagnostics.mcp_tool_names || []).length > 0 ? (
+                                            <div className="text-xs text-muted-foreground break-words">
+                                                工具列表: {(smartAddResult.scout_diagnostics.mcp_tool_names || []).join(', ')}
+                                            </div>
+                                        ) : null}
+                                        {smartAddResult.scout_diagnostics.last_error ? (
+                                            <div className="text-xs text-destructive break-words">最后错误: {smartAddResult.scout_diagnostics.last_error}</div>
+                                        ) : null}
+                                        {(smartAddResult.scout_diagnostics.trace || []).length > 0 ? (
+                                            <div className="mt-1 max-h-[180px] overflow-auto rounded border border-border/40 p-1.5 space-y-1">
+                                                {(smartAddResult.scout_diagnostics.trace || []).map((t, idx) => (
+                                                    <div key={`${t.time || ''}_${idx}`} className="text-[11px] leading-4 break-words">
+                                                        <span className="text-muted-foreground">[{t.time || '--:--:--'}]</span>
+                                                        {' '}<span className="font-medium">{t.stage || '-'}</span>
+                                                        {' '}<span>{t.detail || ''}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                ) : null}
+
+                                <div>
+                                    <div className="text-xs text-muted-foreground mb-1">候选仓库</div>
+                                    <div className="space-y-1">
+                                        {(smartAddResult.selected_repositories || []).map((repo, idx) => (
+                                            <div key={`${repo.full_name || repo.clone_url || idx}`} className="text-sm rounded border border-border/60 px-2 py-1">
+                                                <div className="font-medium break-all">{repo.full_name || '-'}</div>
+                                                <div className="text-xs text-muted-foreground break-all">
+                                                    {repo.html_url ? <a href={repo.html_url} target="_blank" rel="noreferrer" className="underline">{repo.html_url}</a> : (repo.clone_url || '-')}
+                                                </div>
+                                                {repo.reason ? <div className="text-xs mt-1">{repo.reason}</div> : null}
+                                            </div>
+                                        ))}
+                                        {(smartAddResult.selected_repositories || []).length === 0 ? (
+                                            <div className="text-xs text-muted-foreground">未选出候选仓库</div>
+                                        ) : null}
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <div className="text-xs text-muted-foreground mb-1">已创建项目</div>
+                                    <div className="space-y-1">
+                                        {(smartAddResult.created_projects || []).map((item, idx) => {
+                                            const pn = item.project_name || `project-${idx + 1}`;
+                                            return (
+                                                <div key={`${pn}_${idx}`} className="text-sm rounded border border-border/60 px-2 py-1 flex items-center justify-between gap-2">
+                                                    <div className="min-w-0">
+                                                        <div className="font-medium truncate">{pn}</div>
+                                                        <div className="text-xs text-muted-foreground truncate">{item.repository?.full_name || ''}</div>
+                                                    </div>
+                                                    <Button size="sm" variant="outline" onClick={() => enterProject(pn)}>进入</Button>
+                                                </div>
+                                            );
+                                        })}
+                                        {(smartAddResult.created_projects || []).length === 0 ? (
+                                            <div className="text-xs text-muted-foreground">尚未创建项目</div>
+                                        ) : null}
+                                    </div>
+                                </div>
+
+                                {(smartAddResult.failed_items || []).length > 0 ? (
+                                    <div>
+                                        <div className="text-xs text-destructive mb-1">失败项</div>
+                                        <div className="space-y-1">
+                                            {(smartAddResult.failed_items || []).map((item, idx) => (
+                                                <div key={`${item.full_name || item.project_name || idx}`} className="text-xs rounded border border-destructive/40 px-2 py-1 text-destructive break-words">
+                                                    {(item.project_name || item.full_name || 'unknown') + ': ' + (item.error || 'unknown error')}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : null}
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
                 </>
                 ) : (
                 <>
@@ -2238,6 +2723,7 @@ function App() {
                                 {Object.entries(digitalHumanRoster || {}).map(([toolName, list]) => {
                                     const roleLabel = (() => {
                                         const t = String(toolName || '');
+                                        if (t.includes('Agent-General-')) return '通用杂项专家';
                                         if (t.includes('Agent-Ops-OpsEnvScoutAgent')) return '远程环境运维工程师';
                                         if (t.includes('Agent-Ops-OpsCommonAgent')) return '环境运维专家';
                                         if (t.includes('Agent-Analyze-')) return '代码审计专家';
@@ -2743,6 +3229,7 @@ function App() {
         {/* Fullscreen Chat — rendered at top level, completely independent of the project page */}
         {chatFullscreen && (() => {
             const getRoleLabel = (toolName: string) => {
+                if (toolName.includes('Agent-General-')) return '通用杂项专家';
                 if (toolName.includes('Agent-Ops-OpsEnvScoutAgent')) return '远程环境运维工程师';
                 if (toolName.includes('Agent-Ops-OpsCommonAgent')) return '环境运维专家';
                 if (toolName.includes('Agent-Analyze-')) return '代码审计专家';

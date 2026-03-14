@@ -38,12 +38,20 @@ func BuildAgent(task *taskManager.Task, systemPrompt string, toolFactories []Too
 func AnalyzeToolFactories() []ToolFactory {
 	return []ToolFactory{
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewDetectLanguageTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewListSourceCodeTreeTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewSearchFileContentsByRegexTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewReadLinesFromFileTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewListSourceCodeTreeTool(task)
+		},
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewSearchFileContentsByRegexTool(task)
+		},
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewReadLinesFromFileTool(task)
+		},
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewTaskListTool(task) },
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewGuidanceTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewIssueCandidateExploitIdeaTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewIssueCandidateExploitIdeaTool(task)
+		},
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewIssueTool(task) },
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewAgentFinishTool(task) },
 	}
@@ -66,9 +74,15 @@ func OpsToolFactories() []ToolFactory {
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewGolangEnvTool(task) },
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewMySQLEnvTool(task) },
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewRedisEnvTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewListSourceCodeTreeTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewSearchFileContentsByRegexTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewReadLinesFromFileTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewListSourceCodeTreeTool(task)
+		},
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewSearchFileContentsByRegexTool(task)
+		},
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewReadLinesFromFileTool(task)
+		},
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewTaskListTool(task) },
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewGuidanceTool(task) },
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewIssueTool(task) },
@@ -79,22 +93,36 @@ func OpsToolFactories() []ToolFactory {
 func VerifierToolFactories() []ToolFactory {
 	return []ToolFactory{
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewDetectLanguageTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewListSourceCodeTreeTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewSearchFileContentsByRegexTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewReadLinesFromFileTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewListSourceCodeTreeTool(task)
+		},
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewSearchFileContentsByRegexTool(task)
+		},
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewReadLinesFromFileTool(task)
+		},
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewTaskListTool(task) },
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewGuidanceTool(task) },
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewRunCommandTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewSubmitExploitIdeaTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewSubmitExploitChainTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewSubmitExploitIdeaTool(task)
+		},
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewSubmitExploitChainTool(task)
+		},
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewRunPythonCodeTool(task) },
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewRunPHPCodeTool(task) },
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewRunSQLTool(task) },
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewDockerLogsTool(task) },
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewDockerDirScanTool(task) },
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewDockerFileReadTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewGetExploitIdeaByIdTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewGetExploitChainByIdTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewGetExploitIdeaByIdTool(task)
+		},
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewGetExploitChainByIdTool(task)
+		},
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewIssueTool(task) },
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewAgentFinishTool(task) },
 	}
@@ -103,23 +131,39 @@ func VerifierToolFactories() []ToolFactory {
 func OverviewToolFactories() []ToolFactory {
 	return []ToolFactory{
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewDetectLanguageTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewListSourceCodeTreeTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewReadLinesFromFileTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewSearchFileContentsByRegexTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewListSourceCodeTreeTool(task)
+		},
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewReadLinesFromFileTool(task)
+		},
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewSearchFileContentsByRegexTool(task)
+		},
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewAgentFinishTool(task) },
 	}
 }
 
 func ReportToolFactories(reportType string) []ToolFactory {
 	base := []ToolFactory{
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewListSourceCodeTreeTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewSearchFileContentsByRegexTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewReadLinesFromFileTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewListSourceCodeTreeTool(task)
+		},
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewSearchFileContentsByRegexTool(task)
+		},
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewReadLinesFromFileTool(task)
+		},
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewIssueTool(task) },
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewGuidanceTool(task) },
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewReportVulnTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewGetExploitIdeaByIdTool(task) },
-		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewGetExploitChainByIdTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewGetExploitIdeaByIdTool(task)
+		},
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewGetExploitChainByIdTool(task)
+		},
 		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewAgentFinishTool(task) },
 	}
 	if reportType == "verifier" {
@@ -134,4 +178,30 @@ func ReportToolFactories(reportType string) []ToolFactory {
 		)
 	}
 	return base
+}
+
+func GeneralToolFactories() []ToolFactory {
+	return []ToolFactory{
+		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewRunCommandTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewDetectLanguageTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewListSourceCodeTreeTool(task)
+		},
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewSearchFileContentsByRegexTool(task)
+		},
+		func(task *taskManager.Task) toolCalling.ToolHandler {
+			return toolCalling.NewReadLinesFromFileTool(task)
+		},
+		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewRunPythonCodeTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewRunPHPCodeTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewRunSQLTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewDockerLogsTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewDockerDirScanTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewDockerFileReadTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewTaskListTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewGuidanceTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewIssueTool(task) },
+		func(task *taskManager.Task) toolCalling.ToolHandler { return toolCalling.NewAgentFinishTool(task) },
+	}
 }
